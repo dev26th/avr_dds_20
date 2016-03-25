@@ -47,7 +47,7 @@
 #define RESOLUTION 0.095367431640625
 #define MINFREQ 0//minimum frequency
 #define MAXFREQ 65534//maximum DDS frequency
-#define MN_No 9// number of menu items
+#define MN_No 10// number of menu items
 
 //function prototypes
 void delay1s(void);
@@ -83,6 +83,8 @@ const uint8_t MN600[] PROGMEM="    Freq Step   \0";
 const uint8_t MN700[] PROGMEM="     Noise      \0";
 //menu 8
 const uint8_t MN800[] PROGMEM="   High Speed   \0";
+//menu 9
+const uint8_t MN900[] PROGMEM="    PWM (HS)    \0";
 
 //Array of pointers to menu strings stored in flash
 const uint8_t *MENU[]={
@@ -94,7 +96,8 @@ const uint8_t *MENU[]={
 		MN500,	
 		MN600,
 		MN700,
-		MN800
+		MN800,
+		MN900
 		}; 
 //various LCD strings
 const uint8_t MNON[] PROGMEM="ON \0";//ON
@@ -119,6 +122,8 @@ volatile uint32_t acc;		//accumulator
 volatile uint8_t ON;
 volatile uint8_t HSfreq;		//high speed frequency [1...4Mhz]
 volatile uint32_t deltafreq;	//frequency step value
+volatile uint16_t pwmFreq;		//PWM freq [62.5Hz...62500Hz]
+volatile uint8_t  pwmDuty;
 }SG;
 
 //define signals
@@ -279,7 +284,6 @@ void Timer2_Stop(void)
 {
 	TCCR0&=~((1<<CS22)|(1<<CS21)); //Stop timer0
 	TIMSK&=~(1<<TOV2);//Disable Timer0 Overflow interrupts
-
 }
 
 //Initial menu
@@ -307,6 +311,10 @@ void Menu_Update(uint8_t on)
 		LCDGotoXY(0, 1);
 		printf(" %5uMHz", SG.HSfreq);
 		}
+	if (SG.mode==9)	{ // PWM
+		LCDGotoXY(0, 1);
+		printf("%5uHz %3u", SG.pwmFreq, SG.pwmDuty);
+	}
 	if((SG.mode==0)||(SG.mode==1)||(SG.mode==2)||(SG.mode==3)||(SG.mode==4)||(SG.mode==5))
 		{
 			CopyStringtoLCD(CLR, 0, 1 );
@@ -320,26 +328,43 @@ void Menu_Update(uint8_t on)
 		else
 			CopyStringtoLCD(MNOFF, 13, 1 );
 	}
+	_delay_ms(100);
 }
+
 //update frequency value on LCD menu - more smooth display
 void Freq_Update(void)
 {
-if (SG.mode==6)
-{
-	LCDGotoXY(0, 1);
-	printf("    %5uHz", (uint16_t)SG.deltafreq);
-}
-if (SG.mode==8)
-{
-//if HS signal
-	LCDGotoXY(0, 1);
-	printf(" %5uMHz", SG.HSfreq);
-}
-if((SG.mode==0)||(SG.mode==1)||(SG.mode==2)||(SG.mode==3)||(SG.mode==4)||(SG.mode==5))
+	if (SG.mode==6)
 	{
 		LCDGotoXY(0, 1);
-		printf(" %5uHz", (uint16_t)SG.freq);
+		printf("    %5uHz", (uint16_t)SG.deltafreq);
 	}
+	if (SG.mode==8)
+	{
+	//if HS signal
+		LCDGotoXY(0, 1);
+		printf(" %5uMHz", SG.HSfreq);
+	}
+	if (SG.mode==9) { // PWM
+		LCDGotoXY(0, 1);
+		printf("%5uHz", SG.pwmFreq);
+	}
+	if((SG.mode==0)||(SG.mode==1)||(SG.mode==2)||(SG.mode==3)||(SG.mode==4)||(SG.mode==5))
+		{
+			LCDGotoXY(0, 1);
+			printf(" %5uHz", (uint16_t)SG.freq);
+		}
+	_delay_ms(100);
+}
+
+//update duty value on LCD menu - more smooth display
+void Duty_Update(void)
+{
+	if (SG.mode==9) { // PWM
+		LCDGotoXY(8, 1);
+		printf("%3u", SG.pwmDuty);
+	}
+	_delay_ms(100);
 }
 
 //External interrupt0 service routine
@@ -349,18 +374,30 @@ if((SG.mode==0)||(SG.mode==1)||(SG.mode==2)||(SG.mode==3)||(SG.mode==4)||(SG.mod
 //CPHA bit in SPCR register
 ISR(INT0_vect)
 {
-SG.flag=0;//set flag to stop generator
-SPCR|=(1<<CPHA);//using CPHA bit as stop mark
-//CopyStringtoLCD(MNOFF, 13, 1 );
-SG.ON=0;//set off in LCD menu
-loop_until_bit_is_set(BPIN, START);//wait for button release
+	SG.flag = 0;                        // set flag to stop generator
+	SPCR   |= (1<<CPHA);                // using CPHA bit as stop mark
+	SG.ON   = 0;                        // set off in LCD menu
+	loop_until_bit_is_set(BPIN, START); // wait for button release
 }
+
+ISR(INT1_vect)
+{
+	SPCR |= (1<<CPHA);//using CPHA bit as stop mark
+	//loop_until_bit_is_set(BPIN, START);//wait for button release
+}
+
+ISR(INT2_vect)
+{
+	SPCR   |= (1<<CPHA);                // using CPHA bit as stop mark
+	//loop_until_bit_is_set(BPIN, START); // wait for button release
+}
+
 //timer overflow interrupt service tourine
 //checks all button status and if button is pressed
 //value is updated
-ISR(TIMER2_OVF_vect)
+void checkButtons()
 {
-if (bit_is_clear(BPIN, UP))
+if (SG.flag==0 && bit_is_clear(BPIN, UP))
 //Button UP increments value which selects previous signal mode
 //if first mode is reached - jumps to last
 	{
@@ -376,7 +413,7 @@ if (bit_is_clear(BPIN, UP))
 	Menu_Update(SG.ON);
 	loop_until_bit_is_set(BPIN, UP);
 	}
-if (bit_is_clear(BPIN, DOWN))
+if (SG.flag==0 && bit_is_clear(BPIN, DOWN))
 //Button Down decrements value which selects next signal mode
 //if last mode is reached - jumps to first
 	{
@@ -395,7 +432,7 @@ if (bit_is_clear(BPIN, DOWN))
 if (bit_is_clear(BPIN, RIGHT))
 //frequency increment
 	{
-		if(SG.mode==6)
+		if(SG.flag==0 && SG.mode==6)
 		{
 			if(SG.deltafreq==10000)
 				SG.deltafreq=1;
@@ -404,16 +441,50 @@ if (bit_is_clear(BPIN, RIGHT))
 			Freq_Update();
 			loop_until_bit_is_set(BPIN, RIGHT);
 		}
-		if (SG.mode==8)
-			{
-			//ifhigh speed signal
+		if (SG.mode==8) { // high speed signal
 			if(SG.HSfreq==8)
 				SG.HSfreq=1;
 			else
 				SG.HSfreq=(SG.HSfreq<<1);
 			Freq_Update();
 			loop_until_bit_is_set(BPIN, RIGHT);
+			if(SG.flag) {
+				Timer1_Stop();
+				Timer1_Start(SG.HSfreq);
 			}
+		}
+		if (SG.mode==9) { // PWM
+			if(!SG.flag) {
+				switch(SG.pwmFreq) {
+					case 61:    SG.pwmFreq = 244; break;
+					case 244:   SG.pwmFreq = 976; break;
+					case 976:   SG.pwmFreq = 7813; break;
+					case 7813:  SG.pwmFreq = 62500; break;
+					case 62500: SG.pwmFreq = 61; break;
+				}
+				Freq_Update();
+				loop_until_bit_is_set(BPIN, RIGHT);
+			}
+			else {
+				if(SG.pwmDuty < 255) ++SG.pwmDuty;
+				OCR1A = SG.pwmDuty;
+				Duty_Update();
+				uint8_t ii=0;
+				//press button and wait for long press (~0.5s)
+				do{
+					_delay_ms(2);
+					ii++;
+				}while((bit_is_clear(BPIN, RIGHT))&&(ii<=250));//wait for button release
+				if(ii>=250)
+				{
+					do{
+						if(SG.pwmDuty < 255) ++SG.pwmDuty;
+						OCR1A = SG.pwmDuty;
+						Duty_Update();
+					}while(bit_is_clear(BPIN, RIGHT));//wait for button release
+				}
+			}
+		}
 		if((SG.mode==0)||(SG.mode==1)||(SG.mode==2)||(SG.mode==3)||(SG.mode==4)||(SG.mode==5))
 			{
 				if ((0xFFFF-SG.freq)>=SG.deltafreq)
@@ -435,10 +506,9 @@ if (bit_is_clear(BPIN, RIGHT))
 				}
 			}
 	}
-if (bit_is_clear(BPIN, LEFT))
-//frequency decrement
-	{
-		if(SG.mode==6)
+	
+	if (bit_is_clear(BPIN, LEFT)) { //frequency decrement
+		if(SG.flag==0 && SG.mode==6)
 		{
 			if(SG.deltafreq==1)
 				SG.deltafreq=10000;
@@ -447,16 +517,50 @@ if (bit_is_clear(BPIN, LEFT))
 			Freq_Update();
 			loop_until_bit_is_set(BPIN, LEFT);
 		}
-		if (SG.mode==8)
-			{
-			//ifhigh speed signal
+		if (SG.mode==8) { // high speed signal
 			if(SG.HSfreq==1)
 				SG.HSfreq=8;
 			else
 				SG.HSfreq=(SG.HSfreq>>1);
 			Freq_Update();
 			loop_until_bit_is_set(BPIN, LEFT);
+			if(SG.flag) {
+				Timer1_Stop();
+				Timer1_Start(SG.HSfreq);
 			}
+		}
+		if (SG.mode==9) { // PWM
+			if(!SG.flag) {
+				switch(SG.pwmFreq) {
+					case 61:    SG.pwmFreq = 62500; break;
+					case 244:   SG.pwmFreq = 61; break;
+					case 976:   SG.pwmFreq = 244; break;
+					case 7813:  SG.pwmFreq = 976; break;
+					case 62500: SG.pwmFreq = 7813; break;
+				}
+				Freq_Update();
+				loop_until_bit_is_set(BPIN, LEFT);
+			}
+			else {
+				if(SG.pwmDuty > 0) --SG.pwmDuty;
+				OCR1A = SG.pwmDuty;
+				Duty_Update();
+				uint8_t ii=0;
+				//press button and wait for long press (~0.5s)
+				do{
+					_delay_ms(2);
+					ii++;
+				}while((bit_is_clear(BPIN, LEFT))&&(ii<=250));//wait for button release
+				if(ii>=250)
+				{
+					do{
+						if(SG.pwmDuty > 0) --SG.pwmDuty;
+						OCR1A = SG.pwmDuty;
+						Duty_Update();
+					}while(bit_is_clear(BPIN, LEFT));//wait for button release
+				}
+			}
+		}
 		if ((SG.mode==0)||(SG.mode==1)||(SG.mode==2)||(SG.mode==3)||(SG.mode==4)||(SG.mode==5))
 			{
 				if (SG.freq>=SG.deltafreq)
@@ -478,33 +582,38 @@ if (bit_is_clear(BPIN, LEFT))
 				}
 			}
 	}
-if (bit_is_clear(BPIN, START))
-	{
-if(SG.mode!=6)
-	{
-		//saving last configuration
-		SG.fr1=(uint8_t)(SG.freq);
-		SG.fr2=(uint8_t)(SG.freq>>8);
-		SG.fr3=(uint8_t)(SG.freq>>16);
-		if (eeprom_read_byte((uint8_t*)EEMODE)!=SG.mode) eeprom_write_byte((uint8_t*)EEMODE,SG.mode);
-		if (eeprom_read_byte((uint8_t*)EEFREQ1)!=SG.fr1) eeprom_write_byte((uint8_t*)EEFREQ1,SG.fr1);
-		if (eeprom_read_byte((uint8_t*)EEFREQ2)!=SG.fr2) eeprom_write_byte((uint8_t*)EEFREQ2,SG.fr2);
-		if (eeprom_read_byte((uint8_t*)EEFREQ3)!=SG.fr3) eeprom_write_byte((uint8_t*)EEFREQ3,SG.fr3);
-		//Calculate frequency value from restored EEPROM values
-		SG.freq=(((uint32_t)(SG.fr3)<<16)|((uint32_t)(SG.fr2)<<8)|((uint32_t)(SG.fr1)));
-		//calculate accumulator value
-		SG.acc=SG.freq/RESOLUTION;
-		SG.flag=1;//set flag to start generator
-		SG.ON=1;//set ON on LCD menu
-		SPCR&=~(1<<CPHA);//clear CPHA bit in SPCR register to allow DDS
-		//Stop timer2 - menu inactive
-		Timer2_Stop();
-		//display ON on LCD
-		Menu_Update(SG.ON);
-	}
-	loop_until_bit_is_set(BPIN, START);//wait for button release
+	
+	if(!SG.flag && bit_is_clear(BPIN, START)) {
+		if(SG.mode != 6) {
+			//saving last configuration
+			SG.fr1=(uint8_t)(SG.freq);
+			SG.fr2=(uint8_t)(SG.freq>>8);
+			SG.fr3=(uint8_t)(SG.freq>>16);
+			if (eeprom_read_byte((uint8_t*)EEMODE)!=SG.mode) eeprom_write_byte((uint8_t*)EEMODE,SG.mode);
+			if (eeprom_read_byte((uint8_t*)EEFREQ1)!=SG.fr1) eeprom_write_byte((uint8_t*)EEFREQ1,SG.fr1);
+			if (eeprom_read_byte((uint8_t*)EEFREQ2)!=SG.fr2) eeprom_write_byte((uint8_t*)EEFREQ2,SG.fr2);
+			if (eeprom_read_byte((uint8_t*)EEFREQ3)!=SG.fr3) eeprom_write_byte((uint8_t*)EEFREQ3,SG.fr3);
+			//Calculate frequency value from restored EEPROM values
+			SG.freq=(((uint32_t)(SG.fr3)<<16)|((uint32_t)(SG.fr2)<<8)|((uint32_t)(SG.fr1)));
+			SG.flag=1;//set flag to start generator
+			SG.ON=1;//set ON on LCD menu
+			//Stop timer2 - menu inactive
+			Timer2_Stop();
+			//display ON on LCD
+			Menu_Update(SG.ON);
+		}
+		loop_until_bit_is_set(BPIN, START);//wait for button release
 	}
 }
+
+//timer overflow interrupt service tourine
+//checks all button status and if button is pressed
+//value is updated
+ISR(TIMER2_OVF_vect)
+{
+	checkButtons();
+}
+
 /*DDS signal generation function
 Original idea is taken from
 http://www.myplace.nu/avr/minidds/index.htm
@@ -553,6 +662,23 @@ switch(FMHz){
 	//start timer without prescaler
 	TCCR1B=0b00001001;
 }
+
+void Timer1_StartPwm(uint8_t freqHz)
+{
+	uint8_t prescaler;
+	switch(SG.pwmFreq) {
+		case 61:    prescaler = 0b101; break;
+		case 244:   prescaler = 0b100; break;
+		case 976:   prescaler = 0b011; break;
+		case 7813:  prescaler = 0b010; break;
+		case 62500: prescaler = 0b001; break;
+	}
+	
+	// Fast PWM 8 bit; non-inverting
+	TCCR1A = (1<<WGM10) | (1<<COM1A1);
+	TCCR1B = (1<<WGM12) | prescaler;
+}
+
 void Timer1_Stop(void)
 {
 	TCCR1B=0x00;//timer off
@@ -587,12 +713,18 @@ SG.flag=0;
 //default 1MHz HS signal freq
 SG.HSfreq=1;
 SG.deltafreq=100;
+
+SG.pwmFreq = 62500;
+SG.pwmDuty = 128;
 //------------init DDS output-----------
 R2RPORT=0x00;//set initial zero values
 R2RDDR=0xFF;//set A port as output
 //-------------set ports pins for buttons----------
 BDDR&=~(_BV(START)|_BV(UP)|_BV(DOWN)|_BV(RIGHT)|_BV(LEFT));
 BPORT|=(_BV(START)|_BV(UP)|_BV(DOWN)|_BV(RIGHT)|_BV(LEFT));
+
+DDRB&=~(_BV(2));
+PORTB=(_BV(2));
 //---------set ports pins for HS output---------
 HSDDR|=_BV(HS);//configure as output
 //-----------Menu init--------------
@@ -604,80 +736,51 @@ Timer2_Init();
 Timer2_Start();
 }
 
-int main(void)
-{
-//Initialize
-Main_Init();
-while(1)//infinite loop 
-	{
-	if (SG.flag==1)
-		{
-		GICR|=(1<<INT0);//set external interrupt to enable stop
-		if (SG.mode==7)
-			{
-			//Noise
-			do
-			{
-				R2RPORT=rand();
-			}while(SG.flag==1);
-			//set signal level to 0
-			R2RPORT=0x00;
-			//display generator OFF
-			Menu_Update(SG.ON);
-			//stop external interrupt
-			GICR&=~(1<<INT0);
-			//start timer menu active
-			Timer2_Start();
+int main(void) {	
+	Main_Init(); // Initialize
+	while(1) {  // infinite loop 
+		if(SG.flag) {
+			GICR |= (1<<INT0) | (1<<INT1) | (1<<INT2); // set external interrupts to enable stop or modify
+			if(SG.mode ==7 ) { // Noise
+				while(SG.flag) {
+					R2RPORT=rand();
+				}
 			}
-/*		else if (SG.mode==6)
-			{
-			//freq step
-			while((SG.flag==1))
-			{
-			//not implemented
-			CopyStringtoLCD(NA, 0, 1 );
-			}
-			//set signal level to 0
-			R2RPORT=0x00;
-			//display generator OFF
-			Menu_Update(SG.ON);	
-			GICR&=~(1<<INT0);//|(1<<INT1);//stop external interrupt
-			//start timer menu active
-			Timer2_Start();
+			/*else if(SG.mode==6) { // freq step
+				while((SG.flag==1));
 			}*/
-		else if (SG.mode==8)
-			{
-			//High speed signal
-			Timer1_Start(SG.HSfreq);
-			while((SG.flag==1))
-			{
-			//not implemented
-			CopyStringtoLCD(MNON, 13, 1 );
+			else if(SG.mode == 8) { // High speed signal
+				Timer2_Start();     // re-activate menu
+				Timer1_Start(SG.HSfreq);
+				while(SG.flag);
 			}
-			Timer1_Stop();//timer off
-			//set HS pin to LOW
-			HSPORT&=~(1<<HS);
-			//display generator OFF
-			Menu_Update(SG.ON);	
-			GICR&=~(1<<INT0);//|(1<<INT1);//stop external interrupt
-			//start timer menu active
-			Timer2_Start();
+			else if(SG.mode == 9) { // PWM
+				Timer2_Start();     // re-activate menu
+				OCR1A = SG.pwmDuty;
+				Timer1_StartPwm(SG.pwmFreq);
+				while(SG.flag);
 			}
-		else
-			{
-			//start DDS
-			Signal_OUT(SIGNALS[SG.mode],
-						(uint8_t)((uint32_t)SG.acc>>16),
-						(uint8_t)((uint32_t)SG.acc>>8),
-						(uint8_t)SG.acc);
-			//set signal level to 0
-			R2RPORT=0x00;
-			//display generator OFF
-			Menu_Update(SG.ON);
-			GICR&=~(1<<INT0);//|(1<<INT1);//stop external interrupt
-			//start timer menu active
-			Timer2_Start();
+			else { // start DDS
+				while(SG.flag) {
+					SG.acc = SG.freq/RESOLUTION; // calculate accumulator value
+					SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
+
+					Signal_OUT(SIGNALS[SG.mode],
+								(uint8_t)((uint32_t)SG.acc>>16),
+								(uint8_t)((uint32_t)SG.acc>>8),
+								(uint8_t)SG.acc);
+					GICR &= ~((1<<INT0) | (1<<INT1) | (1<<INT2));   // stop external interrupts
+					checkButtons();
+					GICR |= (1<<INT0) | (1<<INT1) | (1<<INT2); // set external interrupts to enable stop or modify
+				}
 			}
+			
+			Timer1_Stop();        // timer off
+			R2RPORT = 0x00;       // set signal level to 0
+			Menu_Update(SG.ON);   // display generator OFF
+			GICR &= ~((1<<INT0) | (1<<INT1) | (1<<INT2));   // stop external interrupts
+			HSPORT &= ~(1<<HS);   // set HS pin to LOW
+			Timer2_Start();       // start timer menu active
 		}
 	}
 	return 0;

@@ -59,6 +59,7 @@ void Menu_Update(uint8_t);
 void Freq_Update(void);
 void Timer1_Start(uint8_t);
 void Timer1_Stop(void);
+void checkButtons(void);
 void static inline Signal_OUT(const uint8_t *, uint8_t, uint8_t, uint8_t);
 //adjust LCDsendChar() function for strema
 static int LCDsendstream(char c, FILE *stream);
@@ -395,7 +396,7 @@ ISR(INT2_vect)
 //timer overflow interrupt service tourine
 //checks all button status and if button is pressed
 //value is updated
-void checkButtons()
+void checkButtons(void)
 {
 if (SG.flag==0 && bit_is_clear(BPIN, UP))
 //Button UP increments value which selects previous signal mode
@@ -671,7 +672,7 @@ void Timer1_StartPwm(uint8_t freqHz)
 		case 244:   prescaler = 0b100; break;
 		case 976:   prescaler = 0b011; break;
 		case 7813:  prescaler = 0b010; break;
-		case 62500: prescaler = 0b001; break;
+		default:    prescaler = 0b001; break;
 	}
 	
 	// Fast PWM 8 bit; non-inverting

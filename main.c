@@ -48,7 +48,6 @@
                                       // /(65536 uinits in fraction part)/(256 points per period)
 #define MINFREQ 0//minimum frequency
 #define MAXFREQ 65534//maximum DDS frequency
-#define MN_No 10// number of menu items
 
 //function prototypes
 void delay1s(void);
@@ -68,39 +67,45 @@ static int LCDsendstream(char c, FILE *stream);
 static FILE lcd_str = FDEV_SETUP_STREAM(LCDsendstream, NULL, _FDEV_SETUP_WRITE);
 
 //Menu Strings in flash
-const uint8_t MN000[] PROGMEM="      Sine      \0";
+const uint8_t MN0000[] PROGMEM="      Sine      \0";
 //menu 1
-const uint8_t MN100[] PROGMEM="     Square     \0";
+const uint8_t MN0100[] PROGMEM="     Square     \0";
 //menu 2
-const uint8_t MN200[] PROGMEM="    Triangle    \0";
+const uint8_t MN0200[] PROGMEM="    Triangle    \0";
 //menu 3
-const uint8_t MN300[] PROGMEM="    SawTooth    \0";
+const uint8_t MN0300[] PROGMEM="    SawTooth    \0";
 //menu 4
-const uint8_t MN400[] PROGMEM="  Rev SawTooth  \0";
+const uint8_t MN0400[] PROGMEM="  Rev SawTooth  \0";
 //menu 5
-const uint8_t MN500[] PROGMEM="      ECG       \0";
+const uint8_t MN0500[] PROGMEM="      ECG       \0";
 //menu 6
-const uint8_t MN600[] PROGMEM="    Freq Step   \0";
+const uint8_t MN0600[] PROGMEM="    Freq Step   \0";
 //menu 7
-const uint8_t MN700[] PROGMEM="     Noise      \0";
+const uint8_t MN0700[] PROGMEM="     Noise      \0";
 //menu 8
-const uint8_t MN800[] PROGMEM="   High Speed   \0";
+const uint8_t MN0800[] PROGMEM="   High Speed   \0";
 //menu 9
-const uint8_t MN900[] PROGMEM="    PWM (HS)    \0";
+const uint8_t MN0900[] PROGMEM="    PWM (HS)    \0";
+//menu 10
+const uint8_t MN1000[] PROGMEM="     Sweep      \0";
 
 //Array of pointers to menu strings stored in flash
 const uint8_t *MENU[]={
-		MN000,	//
-		MN100,	//menu 1 string
-		MN200,	//menu 2 string
-		MN300,	//menu 3 string
-		MN400,	//menu 4 string
-		MN500,	
-		MN600,
-		MN700,
-		MN800,
-		MN900
+		MN0000,	//
+		MN0100,	//menu 1 string
+		MN0200,	//menu 2 string
+		MN0300,	//menu 3 string
+		MN0400,	//menu 4 string
+		MN0500,	
+		MN0600,
+		MN0700,
+		MN0800,
+		MN0900,
+		MN1000
 		}; 
+
+#define MN_No (sizeof(MENU)/sizeof(MENU[0]))   // number of menu items
+
 //various LCD strings
 const uint8_t MNON[] PROGMEM="ON \0";//ON
 const uint8_t MNOFF[] PROGMEM="OFF\0";//OFF
@@ -254,6 +259,15 @@ const uint8_t *SIGNALS[] ={
 	rewsawtoothwave,
 	ECG
 };
+
+#define FIRST_SIGNAL    (0)
+#define LAST_SIGNAL     (sizeof(SIGNALS)/sizeof(SIGNALS[0])-1)
+#define MODE_FREQ_STEP  (LAST_SIGNAL+1)
+#define MODE_NOISE      (MODE_FREQ_STEP+1)
+#define MODE_HIGH_SPEED (MODE_NOISE+1)
+#define MODE_PWM        (MODE_HIGH_SPEED+1)
+#define MODE_SWEEP      (MODE_PWM+1)
+
 //adjust LCD stream fuinction to use with printf()
 static int LCDsendstream(char c , FILE *stream)
 {
@@ -296,34 +310,34 @@ void Menu_Update(uint8_t on)
 	LCDclr();
 	CopyStringtoLCD(MENU[(SG.mode)], 0, 0 );
 	LCDGotoXY(0, 1);
-	if (SG.mode==6)
+	if (SG.mode == MODE_FREQ_STEP)
 		{
 			CopyStringtoLCD(CLR, 0, 1 );
 			LCDGotoXY(0, 1);
 			printf("    %5uHz", (uint16_t)SG.deltafreq);
 		}
-	if (SG.mode==7)
+	if (SG.mode == MODE_NOISE)
 		{
 			CopyStringtoLCD(CLR, 0, 1 );
 			CopyStringtoLCD(RND, 0, 1 );
 		}
-	if (SG.mode==8)
+	if (SG.mode == MODE_HIGH_SPEED)
 		{
 		CopyStringtoLCD(CLR, 0, 1 );
 		LCDGotoXY(0, 1);
 		printf(" %5uMHz", SG.HSfreq);
 		}
-	if (SG.mode==9)	{ // PWM
+	if (SG.mode == MODE_PWM)	{ // PWM
 		LCDGotoXY(0, 1);
 		printf("%5uHz %3u", SG.pwmFreq, SG.pwmDuty);
 	}
-	if((SG.mode==0)||(SG.mode==1)||(SG.mode==2)||(SG.mode==3)||(SG.mode==4)||(SG.mode==5))
+	if(SG.mode >= FIRST_SIGNAL && SG.mode <= LAST_SIGNAL)
 		{
 			CopyStringtoLCD(CLR, 0, 1 );
 			LCDGotoXY(0, 1);
 			printf(" %5uHz", (uint16_t)SG.freq);
 		}
-	if (SG.mode!=6)
+	if (SG.mode!=MODE_FREQ_STEP)
 	{
 		if(on==1)
 			CopyStringtoLCD(MNON, 13, 1 );
@@ -336,22 +350,22 @@ void Menu_Update(uint8_t on)
 //update frequency value on LCD menu - more smooth display
 void Freq_Update(void)
 {
-	if (SG.mode==6)
+	if (SG.mode == MODE_FREQ_STEP)
 	{
 		LCDGotoXY(0, 1);
 		printf("    %5uHz", (uint16_t)SG.deltafreq);
 	}
-	if (SG.mode==8)
+	if (SG.mode == MODE_HIGH_SPEED)
 	{
 	//if HS signal
 		LCDGotoXY(0, 1);
 		printf(" %5uMHz", SG.HSfreq);
 	}
-	if (SG.mode==9) { // PWM
+	if (SG.mode == MODE_PWM) { // PWM
 		LCDGotoXY(0, 1);
 		printf("%5uHz", SG.pwmFreq);
 	}
-	if((SG.mode==0)||(SG.mode==1)||(SG.mode==2)||(SG.mode==3)||(SG.mode==4)||(SG.mode==5))
+	if(SG.mode >= FIRST_SIGNAL && SG.mode <= LAST_SIGNAL)
 		{
 			LCDGotoXY(0, 1);
 			printf(" %5uHz", (uint16_t)SG.freq);
@@ -362,7 +376,7 @@ void Freq_Update(void)
 //update duty value on LCD menu - more smooth display
 void Duty_Update(void)
 {
-	if (SG.mode==9) { // PWM
+	if (SG.mode==MODE_PWM) { // PWM
 		LCDGotoXY(8, 1);
 		printf("%3u", SG.pwmDuty);
 	}
@@ -434,7 +448,7 @@ if (SG.flag==0 && bit_is_clear(BPIN, DOWN))
 if (bit_is_clear(BPIN, RIGHT))
 //frequency increment
 	{
-		if(SG.flag==0 && SG.mode==6)
+		if(SG.flag==0 && SG.mode==MODE_FREQ_STEP)
 		{
 			if(SG.deltafreq==10000)
 				SG.deltafreq=1;
@@ -443,7 +457,7 @@ if (bit_is_clear(BPIN, RIGHT))
 			Freq_Update();
 			loop_until_bit_is_set(BPIN, RIGHT);
 		}
-		if (SG.mode==8) { // high speed signal
+		if (SG.mode==MODE_HIGH_SPEED) { // high speed signal
 			if(SG.HSfreq==8)
 				SG.HSfreq=1;
 			else
@@ -455,7 +469,7 @@ if (bit_is_clear(BPIN, RIGHT))
 				Timer1_Start(SG.HSfreq);
 			}
 		}
-		if (SG.mode==9) { // PWM
+		if (SG.mode==MODE_PWM) { // PWM
 			if(!SG.flag) {
 				switch(SG.pwmFreq) {
 					case 61:    SG.pwmFreq = 244; break;
@@ -487,7 +501,7 @@ if (bit_is_clear(BPIN, RIGHT))
 				}
 			}
 		}
-		if((SG.mode==0)||(SG.mode==1)||(SG.mode==2)||(SG.mode==3)||(SG.mode==4)||(SG.mode==5))
+		if(SG.mode >= FIRST_SIGNAL && SG.mode <= LAST_SIGNAL)
 			{
 				if ((0xFFFF-SG.freq)>=SG.deltafreq)
 					SG.freq+=SG.deltafreq;
@@ -510,7 +524,7 @@ if (bit_is_clear(BPIN, RIGHT))
 	}
 	
 	if (bit_is_clear(BPIN, LEFT)) { //frequency decrement
-		if(SG.flag==0 && SG.mode==6)
+		if(SG.flag==0 && SG.mode==MODE_FREQ_STEP)
 		{
 			if(SG.deltafreq==1)
 				SG.deltafreq=10000;
@@ -519,7 +533,7 @@ if (bit_is_clear(BPIN, RIGHT))
 			Freq_Update();
 			loop_until_bit_is_set(BPIN, LEFT);
 		}
-		if (SG.mode==8) { // high speed signal
+		if (SG.mode==MODE_HIGH_SPEED) { // high speed signal
 			if(SG.HSfreq==1)
 				SG.HSfreq=8;
 			else
@@ -531,7 +545,7 @@ if (bit_is_clear(BPIN, RIGHT))
 				Timer1_Start(SG.HSfreq);
 			}
 		}
-		if (SG.mode==9) { // PWM
+		if (SG.mode==MODE_PWM) { // PWM
 			if(!SG.flag) {
 				switch(SG.pwmFreq) {
 					case 61:    SG.pwmFreq = 62500; break;
@@ -563,7 +577,7 @@ if (bit_is_clear(BPIN, RIGHT))
 				}
 			}
 		}
-		if ((SG.mode==0)||(SG.mode==1)||(SG.mode==2)||(SG.mode==3)||(SG.mode==4)||(SG.mode==5))
+		if (SG.mode >= FIRST_SIGNAL && SG.mode <= LAST_SIGNAL)
 			{
 				if (SG.freq>=SG.deltafreq)
 					SG.freq-=SG.deltafreq;
@@ -586,7 +600,7 @@ if (bit_is_clear(BPIN, RIGHT))
 	}
 	
 	if(!SG.flag && bit_is_clear(BPIN, START)) {
-		if(SG.mode != 6) {
+		if(SG.mode != MODE_FREQ_STEP) {
 			//saving last configuration
 			SG.fr1=(uint8_t)(SG.freq);
 			SG.fr2=(uint8_t)(SG.freq>>8);
@@ -743,23 +757,26 @@ int main(void) {
 	while(1) {  // infinite loop 
 		if(SG.flag) {
 			GICR |= (1<<INT0) | (1<<INT1) | (1<<INT2); // set external interrupts to enable stop or modify
-			if(SG.mode ==7 ) { // Noise
+			if(SG.mode ==MODE_NOISE ) { // Noise
 				while(SG.flag) {
 					R2RPORT=rand();
 				}
 			}
-			/*else if(SG.mode==6) { // freq step
+			/*else if(SG.mode==MODE_FREQ_STEP) { // freq step
 				while((SG.flag==1));
 			}*/
-			else if(SG.mode == 8) { // High speed signal
+			else if(SG.mode == MODE_HIGH_SPEED) { // High speed signal
 				Timer2_Start();     // re-activate menu
 				Timer1_Start(SG.HSfreq);
 				while(SG.flag);
 			}
-			else if(SG.mode == 9) { // PWM
+			else if(SG.mode == MODE_PWM) { // PWM
 				Timer2_Start();     // re-activate menu
 				OCR1A = SG.pwmDuty;
 				Timer1_StartPwm(SG.pwmFreq);
+				while(SG.flag);
+			}
+			else if(SG.mode == MODE_SWEEP) { //  Sweep
 				while(SG.flag);
 			}
 			else { // start DDS

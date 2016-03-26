@@ -44,7 +44,8 @@
 #define EEFREQ3 3
 #define EEDUTY 4
 #define EEINIT E2END
-#define RESOLUTION 0.095367431640625
+#define RESOLUTION 0.095367431640625  // (16000000 Hz system clock)/(10 clocks per iteration)
+                                      // /(65536 uinits in fraction part)/(256 points per period)
 #define MINFREQ 0//minimum frequency
 #define MAXFREQ 65534//maximum DDS frequency
 #define MN_No 10// number of menu items

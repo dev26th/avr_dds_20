@@ -265,12 +265,13 @@ LDFLAGS += $(patsubst %,-L%,$(EXTRALIBDIRS))
 LDFLAGS += $(PRINTF_LIB) $(SCANF_LIB) $(MATH_LIB)
 #LDFLAGS += -T linker_script.x
 #Define sections where to store signal tables
-LDFLAGS += -Wl,-section-start=.MySection1=0x3A00
-LDFLAGS += -Wl,-section-start=.MySection2=0x3B00
-LDFLAGS += -Wl,-section-start=.MySection3=0x3C00
-LDFLAGS += -Wl,-section-start=.MySection4=0x3D00
-LDFLAGS += -Wl,-section-start=.MySection5=0x3E00
-LDFLAGS += -Wl,-section-start=.MySection6=0x3F00 
+LDFLAGS += -Wl,-section-start=.MySection1=0x3900
+LDFLAGS += -Wl,-section-start=.MySection2=0x3A00
+LDFLAGS += -Wl,-section-start=.MySection3=0x3B00
+LDFLAGS += -Wl,-section-start=.MySection4=0x3C00
+LDFLAGS += -Wl,-section-start=.MySection5=0x3D00
+LDFLAGS += -Wl,-section-start=.MySection6=0x3E00 
+LDFLAGS += -Wl,-section-start=.MySection7=0x3F00 
 
 
 #---------------- Programming Options (avrdude) ----------------

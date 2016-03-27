@@ -134,8 +134,13 @@ volatile uint8_t  pwmDuty;
 }SG;
 
 //define signals
-const uint8_t  sinewave[] __attribute__ ((section (".MySection1")))= //sine 256 values
+const uint8_t  sinewave[] __attribute__ ((section (".MySection1")))= //sine 256 values, start from 0
 {
+0x00,0x00,0x00,0x00,0x00,
+0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x01,0x02,0x03,0x03,0x04,0x05,0x06,0x07,0x08,
+0x09,0x0a,0x0c,0x0d,0x0f,0x10,0x12,0x13,0x15,0x17,0x19,0x1b,0x1d,0x1f,0x21,0x23,
+0x25,0x27,0x2a,0x2c,0x2e,0x31,0x33,0x36,0x38,0x3b,0x3e,0x40,0x43,0x46,0x49,0x4c,
+0x4f,0x51,0x54,0x57,0x5a,0x5d,0x60,0x63,0x67,0x6a,0x6d,0x70,0x73,0x76,0x79,0x7c,
 0x80,0x83,0x86,0x89,0x8c,0x8f,0x92,0x95,0x98,0x9c,0x9f,0xa2,0xa5,0xa8,0xab,0xae,
 0xb0,0xb3,0xb6,0xb9,0xbc,0xbf,0xc1,0xc4,0xc7,0xc9,0xcc,0xce,0xd1,0xd3,0xd5,0xd8,
 0xda,0xdc,0xde,0xe0,0xe2,0xe4,0xe6,0xe8,0xea,0xec,0xed,0xef,0xf0,0xf2,0xf3,0xf5,
@@ -147,11 +152,7 @@ const uint8_t  sinewave[] __attribute__ ((section (".MySection1")))= //sine 256 
 0x80,0x7c,0x79,0x76,0x73,0x70,0x6d,0x6a,0x67,0x63,0x60,0x5d,0x5a,0x57,0x54,0x51,
 0x4f,0x4c,0x49,0x46,0x43,0x40,0x3e,0x3b,0x38,0x36,0x33,0x31,0x2e,0x2c,0x2a,0x27,
 0x25,0x23,0x21,0x1f,0x1d,0x1b,0x19,0x17,0x15,0x13,0x12,0x10,0x0f,0x0d,0x0c,0x0a,
-0x09,0x08,0x07,0x06,0x05,0x04,0x03,0x03,0x02,0x01,0x01,0x00,0x00,0x00,0x00,0x00,
-0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x01,0x02,0x03,0x03,0x04,0x05,0x06,0x07,0x08,
-0x09,0x0a,0x0c,0x0d,0x0f,0x10,0x12,0x13,0x15,0x17,0x19,0x1b,0x1d,0x1f,0x21,0x23,
-0x25,0x27,0x2a,0x2c,0x2e,0x31,0x33,0x36,0x38,0x3b,0x3e,0x40,0x43,0x46,0x49,0x4c,
-0x4f,0x51,0x54,0x57,0x5a,0x5d,0x60,0x63,0x67,0x6a,0x6d,0x70,0x73,0x76,0x79,0x7c
+0x09,0x08,0x07,0x06,0x05,0x04,0x03,0x03,0x02,0x01,0x01
 };
 const uint8_t squarewave[] __attribute__ ((section (".MySection2")))= //square wave
 {
@@ -262,6 +263,7 @@ const uint8_t *SIGNALS[] ={
 
 #define FIRST_SIGNAL    (0)
 #define LAST_SIGNAL     (sizeof(SIGNALS)/sizeof(SIGNALS[0])-1)
+#define SIGNAL_SINE     (FIRST_SIGNAL)
 #define MODE_FREQ_STEP  (LAST_SIGNAL+1)
 #define MODE_NOISE      (MODE_FREQ_STEP+1)
 #define MODE_HIGH_SPEED (MODE_NOISE+1)
@@ -638,19 +640,49 @@ checks if CPHA bit is set in SPCR register if yes - exit function
 */
 void static inline Signal_OUT(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t ad0)
 {
-asm volatile(	"eor r18, r18 	;r18<-0"	"\n\t"
-				"eor r19, r19 	;r19<-0"	"\n\t"
-				"1:"						"\n\t"
-				"add r18, %0	;1 cycle"			"\n\t"
-				"adc r19, %1	;1 cycle"			"\n\t"	
-				"adc %A3, %2	;1 cycle"			"\n\t"
-				"lpm 			;3 cycles" 	"\n\t"
-				"out %4, __tmp_reg__	;1 cycle"	"\n\t"
-				"sbis %5, 2		;1 cycle if no skip" "\n\t"
-				"rjmp 1b		;2 cycles. Total 10 cycles"	"\n\t"
-				:
-				:"r" (ad0),"r" (ad1),"r" (ad2),"e" (signal),"I" (_SFR_IO_ADDR(PORTA)), "I" (_SFR_IO_ADDR(SPCR))
-				:"r18", "r19" 
+	asm volatile(
+		"eor r18, r18 		; r18<-0"			"\n\t"
+		"eor r19, r19 		; r19<-0"			"\n\t"
+		"1:"							"\n\t"
+		"add r18, %0		; 1 cycle"			"\n\t"
+		"adc r19, %1		; 1 cycle"			"\n\t"	
+		"adc %A3, %2		; 1 cycle"			"\n\t"
+		"lpm 			; 3 cycles" 			"\n\t"
+		"out %4, __tmp_reg__	; 1 cycle"			"\n\t"
+		"sbis %5, 2		; 1 cycle if no skip" 		"\n\t"
+		"rjmp 1b		; 2 cycles. Total 10 cycles"	"\n\t"
+		:
+		: "r"(ad0), "r"(ad1), "r"(ad2), "e"(signal), "I"(_SFR_IO_ADDR(PORTA)), "I"(_SFR_IO_ADDR(SPCR))
+		: "r18", "r19" 
+	);
+}
+
+void static inline Sweep_OUT(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t ad0,
+                             uint8_t ad2inc, uint8_t ad1inc, uint8_t ad0inc)
+{
+	asm volatile(
+		"eor r18, r18 		; r18<-0"			"\n\t"
+		"eor r19, r19 		; r19<-0"			"\n\t"
+		"ldi r16, 11            ; stop frequence"               "\n\t"
+		"1:"							"\n\t"
+		"add r18, %0		; 1 cycle"			"\n\t"
+		"adc r19, %1		; 1 cycle"			"\n\t"	
+		"adc %A3, %2		; 1 cycle"			"\n\t"
+		"breq 2f		; 1 cycle if no jump" 		"\n\t"
+		"lpm 			; 3 cycles" 			"\n\t"
+		"out %4, __tmp_reg__	; 1 cycle"			"\n\t"
+		"rjmp 1b		; 2 cycles. Total 10 cycles"	"\n\t"
+		"2:                     ; +1 cycle from breq"		"\n\t"
+		"add %0, %6		; 1 cycle"			"\n\t"
+		"adc %1, %7		; 1 cycle"			"\n\t"
+		"adc %2, %8		; 1 cycle"			"\n\t"
+		"cp %2, r16		; 1 cycle"			"\n\t"
+		//"sbis %5, 2		; 1 cycle if no skip" 		"\n\t"
+		"brne 1b		; "				"\n\t"
+		:
+		: "r"(ad0), "r"(ad1), "r"(ad2), "e"(signal), "I"(_SFR_IO_ADDR(PORTA)), "I"(_SFR_IO_ADDR(SPCR)), 
+		  "r"(ad0inc), "r"(ad1inc), "r"(ad2inc)
+		: "r16", "r18", "r19"
 	);
 }
 
@@ -757,27 +789,38 @@ int main(void) {
 	while(1) {  // infinite loop 
 		if(SG.flag) {
 			GICR |= (1<<INT0) | (1<<INT1) | (1<<INT2); // set external interrupts to enable stop or modify
-			if(SG.mode ==MODE_NOISE ) { // Noise
+			if(SG.mode == MODE_NOISE) {
 				while(SG.flag) {
 					R2RPORT=rand();
 				}
 			}
-			/*else if(SG.mode==MODE_FREQ_STEP) { // freq step
+			/*else if(SG.mode==MODE_FREQ_STEP) {
 				while((SG.flag==1));
 			}*/
-			else if(SG.mode == MODE_HIGH_SPEED) { // High speed signal
+			else if(SG.mode == MODE_HIGH_SPEED) {
 				Timer2_Start();     // re-activate menu
 				Timer1_Start(SG.HSfreq);
 				while(SG.flag);
 			}
-			else if(SG.mode == MODE_PWM) { // PWM
+			else if(SG.mode == MODE_PWM) {
 				Timer2_Start();     // re-activate menu
 				OCR1A = SG.pwmDuty;
 				Timer1_StartPwm(SG.pwmFreq);
 				while(SG.flag);
 			}
-			else if(SG.mode == MODE_SWEEP) { //  Sweep
-				while(SG.flag);
+			else if(SG.mode == MODE_SWEEP) {
+				SG.acc = SG.freq/RESOLUTION; // calculate accumulator value
+				SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
+
+				Sweep_OUT(SIGNALS[SIGNAL_SINE],
+							(uint8_t)((uint32_t)SG.acc>>16),
+							(uint8_t)((uint32_t)SG.acc>>8),
+							(uint8_t)SG.acc,
+							0,
+							0,
+							10);
+				SG.flag = 0; // once
+				SG.ON   = 0; // set off in LCD menu
 			}
 			else { // start DDS
 				while(SG.flag) {
@@ -789,6 +832,7 @@ int main(void) {
 								(uint8_t)((uint32_t)SG.acc>>8),
 								(uint8_t)SG.acc);
 					GICR &= ~((1<<INT0) | (1<<INT1) | (1<<INT2));   // stop external interrupts
+					R2RPORT = 0x00;       // set signal level to 0
 					checkButtons();
 					GICR |= (1<<INT0) | (1<<INT1) | (1<<INT2); // set external interrupts to enable stop or modify
 				}

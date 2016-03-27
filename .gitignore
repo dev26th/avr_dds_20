@@ -6,5 +6,4 @@
 *.sym
 *.o
 *.elf
-*.hex
 *.swp

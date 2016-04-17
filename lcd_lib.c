@@ -185,7 +185,7 @@ void LCDhome(void)			//LCD cursor home
 {
 	LCDsendCommand(1<<LCD_HOME);
 }
-void LCDstring(uint8_t* data, uint8_t nBytes)	//Outputs string to LCD
+void LCDstring(const char * data, uint8_t nBytes)	//Outputs string to LCD
 {
 register uint8_t i;
 
@@ -217,7 +217,7 @@ void LCDGotoXY(uint8_t x, uint8_t y)	//Cursor to X Y position
 //Copies string from flash memory to LCD at x y position
 //const uint8_t welcomeln1[] PROGMEM="AVR LCD DEMO\0";
 //CopyStringtoLCD(welcomeln1, 3, 1);	
-void CopyStringtoLCD(const uint8_t *FlashLoc, uint8_t x, uint8_t y)
+void CopyStringtoLCD(const char * FlashLoc, uint8_t x, uint8_t y)
 {
 	uint8_t i;
 	LCDGotoXY(x,y);

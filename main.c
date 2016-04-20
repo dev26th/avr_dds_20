@@ -81,6 +81,9 @@ void buttonNop(void);
 void menu_onUp(void);
 void menu_onDown(void);
 void menu_onOpt(void);
+void optMenu_onUp(void);
+void optMenu_onDown(void);
+void optMenu_onOpt(void);
 void signal_onLeft(void);
 void signal_onRight(void);
 void signal_onStart(void);
@@ -99,7 +102,6 @@ void offLevel_onRight(void);
 
 // menu processing
 typedef void (MenuItemEnterHandlerFn_t)(void);
-void onNewMenuEntry(void);
 void signal_updateDisplay(void);
 void noise_updateDisplay(void);
 void freqStep_updateDisplay(void);
@@ -221,19 +223,6 @@ const struct MenuEntry MENU[] = {
 		}
 	},
 	{
-		FREQ_STEP_TITLE,
-		0,
-		freqStep_updateDisplay,
-		{
-			menu_onUp,
-			menu_onDown,
-			freqStep_onLeft,
-			freqStep_onRight,
-			buttonNop,
-			menu_onOpt,
-		}
-	},
-	{
 		NOISE_TITLE,
 		0,
 		noise_updateDisplay,
@@ -285,21 +274,38 @@ const struct MenuEntry MENU[] = {
 			menu_onOpt,
 		}
 	},
+};
+static const uint8_t MENU_SIZE = (sizeof(MENU)/sizeof(MENU[0]));
+
+const struct MenuEntry OPT_MENU[] = {
+	{
+		FREQ_STEP_TITLE,
+		0,
+		freqStep_updateDisplay,
+		{
+			optMenu_onUp,
+			optMenu_onDown,
+			freqStep_onLeft,
+			freqStep_onRight,
+			optMenu_onOpt,
+			optMenu_onOpt,
+		}
+	},
 	{
 		OFF_LEVEL_TITLE,
 		0,
 		offLevel_updateDisplay,
 		{
-			menu_onUp,
-			menu_onDown,
+			optMenu_onUp,
+			optMenu_onDown,
 			offLevel_onLeft,
 			offLevel_onRight,
-			buttonNop,
-			menu_onOpt,
+			optMenu_onOpt,
+			optMenu_onOpt,
 		}
 	},
 };
-static const uint8_t MENU_SIZE = (sizeof(MENU)/sizeof(MENU[0]));
+static const uint8_t OPT_MENU_SIZE = (sizeof(OPT_MENU)/sizeof(OPT_MENU[0]));
 
 //various LCD strings
 const char MNON[]  PROGMEM = "ON ";
@@ -490,9 +496,12 @@ static const uint16_t BUTTON_AUTO_START  = 100;
 static const uint16_t BUTTON_AUTO_REPEAT = 8;
 static const uint16_t BUTTON_TIME_WRAP   = 32768;
 
-uint8_t menuEntryNum = 0;
+uint8_t menuEntryNum = 0;                // active or last active main menu entry
+uint8_t optMenuEntryNum = (uint8_t)-1;   // active opt-menu entry or -1 if not in the opt-menu
 const struct MenuEntry * menuEntry;
 struct ButtonHandlers buttonHandlers;
+
+uint8_t signalBuffer[256];
 
 // adjust LCD stream fuinction to use with printf()
 static int LCDsendstream(char c , FILE *stream) {
@@ -663,7 +672,41 @@ void menu_onDown(void) {
 	}
 }
 
+void onNewOptMenuEntry(void) {
+	menuEntry = &OPT_MENU[optMenuEntryNum];
+	buttonHandlers = menuEntry->buttonHandlers;
+
+	LCDclr();
+	CopyStringtoLCD(menuEntry->title, 0, 0);
+	menuEntry->updateDisplay();
+}
+
 void menu_onOpt(void) {
+	if(!SG.running) {
+		optMenuEntryNum = 0;
+		onNewOptMenuEntry();
+	}
+}
+
+void optMenu_onUp(void) {
+	if(!SG.running) {
+		if(optMenuEntryNum == 0) optMenuEntryNum = OPT_MENU_SIZE - 1;
+		else                     --optMenuEntryNum;
+		onNewOptMenuEntry();
+	}
+}
+
+void optMenu_onDown(void) {
+	if(!SG.running) {
+		++optMenuEntryNum;
+		if(optMenuEntryNum == OPT_MENU_SIZE) optMenuEntryNum = 0;
+		onNewOptMenuEntry();
+	}
+}
+
+void optMenu_onOpt(void) {
+	optMenuEntryNum = (uint8_t)-1;
+	onNewMenuEntry();
 }
 
 void signal_updateDisplay(void) {
@@ -754,11 +797,19 @@ void noise_updateDisplay(void) {
 	CopyStringtoLCD(SG.running ? MNON : MNOFF, 13, 1);
 }
 
+void fillSignalBufferWithNoise(void) {
+	for(uint16_t i = 0; i < sizeof(signalBuffer); ++i) {
+		signalBuffer[i] = rand();
+	}
+}
+
 void noise_onStart(void) {
 	signal_start();
 	SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
+	fillSignalBufferWithNoise();
+	uint8_t pos = 0;
 	while(!SPCR) {
-		R2RPORT = rand();
+		R2RPORT = signalBuffer[pos++]; // FIXME here is still optimization potential
 	}
 	signal_stop();
 }

@@ -60,8 +60,8 @@
 #define EE_OFF_LEVEL   10
 #define EE_INIT        E2END
 
-#define RESOLUTION 0.095367431640625  // (16000000 Hz system clock)/(10 clocks per iteration)
-                                      // /(65536 units in fraction part)/(256 points per period)
+#define RESOLUTION (16000000.0/9/65536/256)  // (16000000 Hz system clock)/(9 clocks per iteration)
+                                             // /(2 bytes in fraction part => 65536 units)/(256 points per period)
 #define MIN_FREQ 0      // minimum frequency
 #define MAX_FREQ 100000 // maximum DDS frequency
 
@@ -72,6 +72,7 @@ void timer1Start(uint8_t);
 void timer1StartPwm(uint16_t);
 void timer1Stop(void);
 void static inline signalOut(const uint8_t *, uint8_t, uint8_t, uint8_t);
+void static inline randomSignalOut(const uint8_t *);
 void static inline sweepOut(const uint8_t *, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
 
 // button processing
@@ -143,7 +144,7 @@ const char PWM_TITLE[]       PROGMEM = "    PWM (HS)    ";
 const char SWEEP_TITLE[]     PROGMEM = "     Sweep      ";
 const char OFF_LEVEL_TITLE[] PROGMEM = "   Off Level    ";
 
-const struct MenuEntry MENU[] = {
+const struct MenuEntry MENU[] PROGMEM = {
 	{
 		SINE_TITLE,
 		0,
@@ -277,7 +278,7 @@ const struct MenuEntry MENU[] = {
 };
 static const uint8_t MENU_SIZE = (sizeof(MENU)/sizeof(MENU[0]));
 
-const struct MenuEntry OPT_MENU[] = {
+const struct MenuEntry OPT_MENU[] PROGMEM = {
 	{
 		FREQ_STEP_TITLE,
 		0,
@@ -324,7 +325,7 @@ struct signal {
 } SG;
 
 //define signals
-const uint8_t SINE_WAVE[] __attribute__ ((section (".MySection1"))) = {
+const uint8_t SINE_WAVE[] PROGMEM = {
 	0x80,0x83,0x86,0x89,0x8c,0x8f,0x92,0x95,0x98,0x9c,0x9f,0xa2,0xa5,0xa8,0xab,0xae,
 	0xb0,0xb3,0xb6,0xb9,0xbc,0xbf,0xc1,0xc4,0xc7,0xc9,0xcc,0xce,0xd1,0xd3,0xd5,0xd8,
 	0xda,0xdc,0xde,0xe0,0xe2,0xe4,0xe6,0xe8,0xea,0xec,0xed,0xef,0xf0,0xf2,0xf3,0xf5,
@@ -343,7 +344,7 @@ const uint8_t SINE_WAVE[] __attribute__ ((section (".MySection1"))) = {
 	0x4f,0x51,0x54,0x57,0x5a,0x5d,0x60,0x63,0x67,0x6a,0x6d,0x70,0x73,0x76,0x79,0x7c
 };
 
-const uint8_t SQUARE_WAVE[] __attribute__ ((section (".MySection2"))) = {
+const uint8_t SQUARE_WAVE[] PROGMEM = {
 	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
 	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
 	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
@@ -362,7 +363,7 @@ const uint8_t SQUARE_WAVE[] __attribute__ ((section (".MySection2"))) = {
 	0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,
 };
 
-const uint8_t SAWTOOTH_WAVE[] __attribute__ ((section (".MySection3"))) = {
+const uint8_t SAWTOOTH_WAVE[] PROGMEM = {
 	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
 	0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f,
 	0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x29,0x2a,0x2b,0x2c,0x2d,0x2e,0x2f,
@@ -381,7 +382,7 @@ const uint8_t SAWTOOTH_WAVE[] __attribute__ ((section (".MySection3"))) = {
 	0xf0,0xf1,0xf2,0xf3,0xf4,0xf5,0xf6,0xf7,0xf8,0xf9,0xfa,0xfb,0xfc,0xfd,0xfe,0xff
 };
 
-const uint8_t REV_SAWTOOTH_WAVE[] __attribute__ ((section (".MySection4"))) = {
+const uint8_t REV_SAWTOOTH_WAVE[] PROGMEM = {
 	0xff,0xfe,0xfd,0xfc,0xfb,0xfa,0xf9,0xf8,0xf7,0xf6,0xf5,0xf4,0xf3,0xf2,0xf1,0xf0,
 	0xef,0xee,0xed,0xec,0xeb,0xea,0xe9,0xe8,0xe7,0xe6,0xe5,0xe4,0xe3,0xe2,0xe1,0xe0,
 	0xdf,0xde,0xdd,0xdc,0xdb,0xda,0xd9,0xd8,0xd7,0xd6,0xd5,0xd4,0xd3,0xd2,0xd1,0xd0,
@@ -400,7 +401,7 @@ const uint8_t REV_SAWTOOTH_WAVE[] __attribute__ ((section (".MySection4"))) = {
 	0x0f,0x0e,0x0d,0x0c,0x0b,0x0a,0x09,0x08,0x07,0x06,0x05,0x04,0x03,0x02,0x01,0x00,
 };
 
-const uint8_t TRIANGLE_WAVE[] __attribute__ ((section (".MySection5"))) = {
+const uint8_t TRIANGLE_WAVE[] PROGMEM = {
 	0x00,0x02,0x04,0x06,0x08,0x0a,0x0c,0x0e,0x10,0x12,0x14,0x16,0x18,0x1a,0x1c,0x1e,
 	0x20,0x22,0x24,0x26,0x28,0x2a,0x2c,0x2e,0x30,0x32,0x34,0x36,0x38,0x3a,0x3c,0x3e,
 	0x40,0x42,0x44,0x46,0x48,0x4a,0x4c,0x4e,0x50,0x52,0x54,0x56,0x58,0x5a,0x5c,0x5e,
@@ -419,7 +420,7 @@ const uint8_t TRIANGLE_WAVE[] __attribute__ ((section (".MySection5"))) = {
 	0x1f,0x1d,0x1b,0x19,0x17,0x15,0x13,0x11,0x0f,0x0f,0x0b,0x09,0x07,0x05,0x03,0x01
 };
 
-const uint8_t ECG_WAVE[] __attribute__ ((section (".MySection6"))) = {
+const uint8_t ECG_WAVE[] PROGMEM = {
 	73,74,75,75,74,73,73,73,73,72,71,69,68,67,67,67,
 	68,68,67,65,62,61,59,57,56,55,55,54,54,54,55,55,
 	55,55,55,55,54,53,51,50,49,49,52,61,77,101,132,
@@ -439,7 +440,7 @@ const uint8_t ECG_WAVE[] __attribute__ ((section (".MySection6"))) = {
 	64,64,65,65,65,66,67,68,69,71,72,73
 };
 
-const uint8_t SINE_WAVE_FROM_ZERO[] __attribute__ ((section (".MySection7"))) = { //sine 256 values, start from 0
+const uint8_t SINE_WAVE_FROM_ZERO[] PROGMEM = { //sine 256 values, start from 0
 	0x00,0x00,0x00,0x00,0x00,
 	0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x01,0x02,0x03,0x03,0x04,0x05,0x06,0x07,0x08,
 	0x09,0x0a,0x0c,0x0d,0x0f,0x10,0x12,0x13,0x15,0x17,0x19,0x1b,0x1d,0x1f,0x21,0x23,
@@ -459,7 +460,26 @@ const uint8_t SINE_WAVE_FROM_ZERO[] __attribute__ ((section (".MySection7"))) = 
 	0x09,0x08,0x07,0x06,0x05,0x04,0x03,0x03,0x02,0x01,0x01
 };
 
-const uint8_t * SIGNALS[] = {
+const uint8_t NOISE_SIGNAL[] PROGMEM = {
+	0x0a,0x0e,0x2d,0x73,0xc4,0x40,0xaa,0x8f,0xdd,0xf3,0x6b,0x97,0xb9,0x8d,0x77,0x57,
+	0xe3,0x52,0x93,0x3f,0x25,0x07,0x99,0x5f,0x8b,0x37,0x30,0x7b,0x3a,0x89,0xc6,0xae,
+	0x4e,0x58,0xe4,0x4b,0x48,0x05,0xd6,0xf2,0x5c,0x44,0xef,0xf8,0x69,0xf6,0x92,0x56,
+	0x1d,0x96,0xab,0x2f,0x88,0x35,0xf5,0x36,0x83,0xfc,0x8e,0x60,0xe0,0xda,0xa8,0x5b,
+	0xdf,0x7e,0x4d,0x3b,0x38,0x91,0x2b,0xfa,0x21,0xc2,0x23,0x0d,0x2e,0xce,0x3c,0xb6,
+	0x03,0x32,0xed,0x86,0xe6,0x0f,0x55,0x6a,0x34,0xb8,0x70,0x45,0x49,0x9b,0x76,0xbc,
+	0x18,0x5a,0x41,0x46,0x28,0xfd,0x2c,0xb0,0xea,0xb2,0xde,0x65,0xbb,0x10,0x59,0xf1,
+	0x9d,0xb7,0x29,0xd4,0xeb,0x42,0x85,0x6f,0x39,0xd5,0x26,0x90,0x7f,0xa7,0xe8,0xd9,
+	0x98,0xc1,0x8c,0x11,0x62,0xad,0x81,0x66,0x0c,0x5d,0x19,0x01,0x1e,0xc8,0x87,0xe1,
+	0x2a,0xd2,0x24,0xd1,0x43,0xe7,0x4f,0x68,0xc0,0xaf,0x5e,0x9e,0x84,0xe2,0x50,0xcb,
+	0x1a,0xc3,0xb4,0x74,0x04,0xac,0x64,0xa0,0x13,0xd3,0x31,0x00,0x9c,0xfe,0x4a,0xb3,
+	0x78,0x15,0x3e,0xee,0x94,0x7c,0x1c,0x72,0xa1,0x20,0x9f,0x95,0xcf,0x3d,0x82,0xb5,
+	0xbd,0x54,0xa6,0x47,0x6e,0x75,0xc7,0x1b,0xd7,0x09,0x16,0xf0,0x12,0x02,0xb1,0x06,
+	0x4c,0xcd,0xa9,0xa2,0x6c,0xa5,0x61,0xca,0x7d,0x1f,0x22,0x17,0x14,0xc5,0xd8,0x6d,
+	0x8a,0xf7,0x51,0xa3,0xfb,0xf4,0x63,0xbf,0x79,0xc9,0x27,0xec,0x7a,0x9a,0xbe,0x80,
+	0xff,0xe5,0xba,0xcc,0x0b,0xdb,0xdc,0xf9,0x67,0xe9,0xa4,0x08,0xd0,0x71,0x33,0x53
+};
+
+const uint8_t * const SIGNALS[] PROGMEM = {
 	SINE_WAVE,
 	SQUARE_WAVE,
 	TRIANGLE_WAVE,
@@ -468,7 +488,7 @@ const uint8_t * SIGNALS[] = {
 	ECG_WAVE
 };
 
-const uint8_t * SWEEP_SIGNALS[] = {
+const uint8_t * const SWEEP_SIGNALS[] PROGMEM = {
 	SINE_WAVE_FROM_ZERO
 };
 
@@ -498,15 +518,22 @@ static const uint16_t BUTTON_TIME_WRAP   = 32768;
 
 uint8_t menuEntryNum = 0;                // active or last active main menu entry
 uint8_t optMenuEntryNum = (uint8_t)-1;   // active opt-menu entry or -1 if not in the opt-menu
-const struct MenuEntry * menuEntry;
-struct ButtonHandlers buttonHandlers;
+struct MenuEntry menuEntry;              // copy of active menu entry
+struct ButtonHandlers * buttonHandlers;
 
-uint8_t signalBuffer[256];
+uint8_t signalBuffer[256]
+	__attribute__ ((aligned(256)))
+	__attribute__ ((section (".noinit")));
 
 // adjust LCD stream fuinction to use with printf()
 static int LCDsendstream(char c , FILE *stream) {
 	LCDsendChar(c);
 	return 0;
+}
+
+inline const void * pgm_read_ptr(const void * addr)
+{
+	return (const void *)pgm_read_word(addr);
 }
 
 // initialize Timer2 (used for button reading)
@@ -648,12 +675,12 @@ void buttonNop(void) {
 }
 
 void onNewMenuEntry(void) {
-	menuEntry = &MENU[menuEntryNum];
-	buttonHandlers = menuEntry->buttonHandlers;
+	memcpy_P(&menuEntry, &MENU[menuEntryNum], sizeof(menuEntry));
+	buttonHandlers = &menuEntry.buttonHandlers;
 
 	LCDclr();
-	CopyStringtoLCD(menuEntry->title, 0, 0);
-	menuEntry->updateDisplay();
+	CopyStringtoLCD(menuEntry.title, 0, 0);
+	menuEntry.updateDisplay();
 }
 
 void menu_onUp(void) {
@@ -673,12 +700,12 @@ void menu_onDown(void) {
 }
 
 void onNewOptMenuEntry(void) {
-	menuEntry = &OPT_MENU[optMenuEntryNum];
-	buttonHandlers = menuEntry->buttonHandlers;
+	memcpy_P(&menuEntry, &OPT_MENU[optMenuEntryNum], sizeof(menuEntry));
+	buttonHandlers = &menuEntry.buttonHandlers;
 
 	LCDclr();
-	CopyStringtoLCD(menuEntry->title, 0, 0);
-	menuEntry->updateDisplay();
+	CopyStringtoLCD(menuEntry.title, 0, 0);
+	menuEntry.updateDisplay();
 }
 
 void menu_onOpt(void) {
@@ -748,7 +775,7 @@ void signal_start(void) {
 
 	SG.running = true;
 
-	menuEntry->updateDisplay();
+	menuEntry.updateDisplay();
 	disableMenu();
 }
 
@@ -757,7 +784,8 @@ void signal_run(void) {
 		uint32_t acc = SG.freq/RESOLUTION; // calculate accumulator value
 		SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
 
-		signalOut(SIGNALS[menuEntry->tag],
+		memcpy_P(signalBuffer, pgm_read_ptr(&SIGNALS[menuEntry.tag]), sizeof(signalBuffer));
+		signalOut(signalBuffer,
 			(uint8_t)(acc >> 16),
 			(uint8_t)(acc >> 8),
 			(uint8_t)acc);
@@ -776,7 +804,7 @@ void signal_stop(void) {
 	enableMenu();
 	SG.running = false;
 	R2RPORT = SG.offLevel;
-	menuEntry->updateDisplay();
+	menuEntry.updateDisplay();
 	while(buttonState.pressed != Button_None); // wait until button release, otherwise the generation will be started again
 }
 
@@ -797,20 +825,13 @@ void noise_updateDisplay(void) {
 	CopyStringtoLCD(SG.running ? MNON : MNOFF, 13, 1);
 }
 
-void fillSignalBufferWithNoise(void) {
-	for(uint16_t i = 0; i < sizeof(signalBuffer); ++i) {
-		signalBuffer[i] = rand();
-	}
-}
-
 void noise_onStart(void) {
 	signal_start();
 	SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
-	fillSignalBufferWithNoise();
-	uint8_t pos = 0;
-	while(!SPCR) {
-		R2RPORT = signalBuffer[pos++]; // FIXME here is still optimization potential
-	}
+
+	memcpy_P(signalBuffer, NOISE_SIGNAL, sizeof(signalBuffer));
+	randomSignalOut(signalBuffer);
+
 	signal_stop();
 }
 
@@ -874,14 +895,14 @@ void hs_onStart(void) {
 	else {
 		saveSettings();
 		SG.running = true;
-		menuEntry->updateDisplay();
+		menuEntry.updateDisplay();
 
 		hs_restart();
 		while(SG.running) {
 			processButton();
 		}
 
-		menuEntry->updateDisplay();
+		menuEntry.updateDisplay();
 	}
 }
 
@@ -900,7 +921,7 @@ void pwm_onStart(void) {
 	else {
 		saveSettings();
 		SG.running = true;
-		menuEntry->updateDisplay();
+		menuEntry.updateDisplay();
 
 		OCR1A = SG.pwmDuty;
 		timer1StartPwm(SG.pwmFreq);
@@ -908,7 +929,7 @@ void pwm_onStart(void) {
 			processButton();
 		}
 
-		menuEntry->updateDisplay();
+		menuEntry.updateDisplay();
 	}
 }
 
@@ -951,13 +972,14 @@ void pwm_onRight(void) {
 void sweep_onStart(void) {
 	saveSettings();
 	SG.running = true;
-	menuEntry->updateDisplay();
+	menuEntry.updateDisplay();
 	disableMenu();
 
 	uint32_t acc = SG.freq/RESOLUTION; // calculate accumulator value
 	SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
 
-	sweepOut(SWEEP_SIGNALS[menuEntry->tag],
+	memcpy_P(signalBuffer, SINE_WAVE_FROM_ZERO, sizeof(signalBuffer));
+	sweepOut(signalBuffer,
 		(uint8_t)(acc >> 16),
 		(uint8_t)(acc >> 8),
 		(uint8_t)acc,
@@ -1004,19 +1026,38 @@ checks if CPHA bit is set in SPCR register if yes - exit function
 void static inline signalOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t ad0)
 {
 	asm volatile(
-		"eor r18, r18 		; r18<-0"			"\n\t"
-		"eor r19, r19 		; r19<-0"			"\n\t"
-		"1:"							"\n\t"
-		"add r18, %0		; 1 cycle"			"\n\t"
-		"adc r19, %1		; 1 cycle"			"\n\t"	
-		"adc %A3, %2		; 1 cycle"			"\n\t"
-		"lpm 			; 3 cycles" 			"\n\t"
-		"out %4, __tmp_reg__	; 1 cycle"			"\n\t"
-		"sbis %5, 2		; 1 cycle if no skip" 		"\n\t"
-		"rjmp 1b		; 2 cycles. Total 10 cycles"	"\n\t"
+		"eor r18, r18 			; r18<-0"			"\n\t"
+		"eor r19, r19 			; r19<-0"			"\n\t"
+		"1:"								"\n\t"
+		"add r18, %[ad0]		; 1 cycle"			"\n\t"
+		"adc r19, %[ad1]		; 1 cycle"			"\n\t"	
+		"adc %A3, %[ad2]		; 1 cycle"			"\n\t"
+		"ld __tmp_reg__, Z 		; 2 cycles" 			"\n\t"
+		"out %[out], __tmp_reg__	; 1 cycle"			"\n\t"
+		"sbis %[cond], 2		; 1 cycle if no skip" 		"\n\t"
+		"rjmp 1b			; 2 cycles. Total 9 cycles"	"\n\t"
 		:
-		: "r"(ad0), "r"(ad1), "r"(ad2), "e"(signal), "I"(_SFR_IO_ADDR(R2RPORT)), "I"(_SFR_IO_ADDR(SPCR))
+		: [ad0] "r"(ad0), [ad1] "r"(ad1), [ad2] "r"(ad2), // phase increment
+		  [sig] "z"(signal),                              // signal source
+		  [out] "I"(_SFR_IO_ADDR(R2RPORT)),               // output port
+		  [cond] "I"(_SFR_IO_ADDR(SPCR))                  // exit condition
 		: "r18", "r19" 
+	);
+}
+
+void static inline randomSignalOut(const uint8_t *signal)
+{
+	asm volatile(
+		"1:"								"\n\t"
+		"ld __tmp_reg__, Z 		; 2 cycles" 			"\n\t"
+		"inc r30			; 1 cycle"			"\n\t"
+		"out %[out], __tmp_reg__	; 1 cycle"			"\n\t"
+		"sbis %[cond], 2		; 1 cycle if no skip" 		"\n\t"
+		"rjmp 1b			; 2 cycles. Total 7 cycles"	"\n\t"
+		:
+		: [sig] "z"(signal),                              // signal source
+		  [out] "I"(_SFR_IO_ADDR(R2RPORT)),               // output port
+		  [cond] "I"(_SFR_IO_ADDR(SPCR))                  // exit condition
 	);
 }
 
@@ -1033,9 +1074,9 @@ void static inline sweepOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uin
 		"adc r19, %1		; 1 cycle"			"\n\t"	
 		"adc %A3, %2		; 1 cycle"			"\n\t"
 		"breq 2f		; 1 cycle if no jump" 		"\n\t"
-		"lpm 			; 3 cycles" 			"\n\t"
+		"ld __tmp_reg__, Z	; 2 cycles" 			"\n\t"
 		"out %4, __tmp_reg__	; 1 cycle"			"\n\t"
-		"rjmp 1b		; 2 cycles. Total 10 cycles"	"\n\t"
+		"rjmp 1b		; 2 cycles. Total 9 cycles"	"\n\t"
 		"2:                     ; "				"\n\t"
 		"add %0, %6		; "				"\n\t"
 		"adc %1, %7		; "				"\n\t"
@@ -1048,8 +1089,11 @@ void static inline sweepOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uin
 		"sbis %5, 2		; "		 		"\n\t"
 		"brne 1b		; "				"\n\t"
 		:
-		: "r"(ad0), "r"(ad1), "r"(ad2), "e"(signal), "I"(_SFR_IO_ADDR(R2RPORT)), "I"(_SFR_IO_ADDR(SPCR)), 
-		  "r"(ad0inc), "r"(ad1inc), "r"(ad2inc)
+		: "r"(ad0), "r"(ad1), "r"(ad2),                    // phase increment
+		  "z"(signal),                                     // signal source
+		  "I"(_SFR_IO_ADDR(R2RPORT)),                      // output port
+		  "I"(_SFR_IO_ADDR(SPCR)),                         // exit condition
+		  "r"(ad0inc), "r"(ad1inc), "r"(ad2inc)            // increment of the increment
 		: "r16", "r17", "r18", "r19"
 	);
 }
@@ -1124,12 +1168,12 @@ void processButton(void) {
 
 		switch(pressed) {
 			case Button_None:  break;
-			case Button_Up:    buttonHandlers.onUp();    break;
-			case Button_Right: buttonHandlers.onRight(); break;
-			case Button_Down:  buttonHandlers.onDown();  break;
-			case Button_Left:  buttonHandlers.onLeft();  break;
-			case Button_Start: buttonHandlers.onStart(); break;
-			case Button_Opt:   buttonHandlers.onOpt();   break;
+			case Button_Up:    buttonHandlers->onUp();    break;
+			case Button_Right: buttonHandlers->onRight(); break;
+			case Button_Down:  buttonHandlers->onDown();  break;
+			case Button_Left:  buttonHandlers->onLeft();  break;
+			case Button_Start: buttonHandlers->onStart(); break;
+			case Button_Opt:   buttonHandlers->onOpt();   break;
 		}
 	}
 }

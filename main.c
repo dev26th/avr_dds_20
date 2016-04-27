@@ -62,8 +62,11 @@
 
 #define RESOLUTION (16000000.0/9/65536/256)  // (16000000 Hz system clock)/(9 clocks per iteration)
                                              // /(2 bytes in fraction part => 65536 units)/(256 points per period)
-#define MIN_FREQ 0      // minimum frequency
-#define MAX_FREQ 100000 // maximum DDS frequency
+#define FREQ_CAL      0.9999     // some calibration coeficient FIXME should be run-time configurable
+#define MIN_FREQ      0.0        // minimum DDS frequency
+#define MAX_FREQ      999999.999 // maximum DDS frequency
+#define MIN_FREQ_STEP 0.001      // minimum DDS frequency step
+#define MAX_FREQ_STEP 10000.0    // maximum DDS frequency step
 
 void timer2Init(void);
 void timer2Start(void);
@@ -311,15 +314,14 @@ static const uint8_t OPT_MENU_SIZE = (sizeof(OPT_MENU)/sizeof(OPT_MENU[0]));
 //various LCD strings
 const char MNON[]  PROGMEM = "ON ";
 const char MNOFF[] PROGMEM = "OFF";
-const char CLR[]   PROGMEM = "                "; // clear freq value	
 const char RND[]   PROGMEM = "    Random";
 
 struct signal {
-	volatile uint32_t freq;		// frequency value
+	volatile double   freq;		// frequency value
 	volatile bool     running;	// generator on/off
-	volatile uint8_t  hsFreq;	// high speed frequency [1..4Mhz]
-	volatile uint32_t freqStep;	// frequency step value
-	volatile uint16_t pwmFreq;	// PWM freq [62.5Hz..62500Hz]
+	volatile uint8_t  hsFreq;	// high speed frequency [1..8Mhz]
+	volatile double   freqStep;	// frequency step value
+	volatile uint16_t pwmFreq;	// PWM freq [61..62500Hz]
 	volatile uint8_t  pwmDuty;
 	volatile uint8_t  offLevel;     // output value when then generator if off
 } SG;
@@ -618,12 +620,13 @@ void eepromSaveByte(uint16_t addr, uint8_t v) {
 void saveSettings(void) {
 	eepromSaveByte(EE_MENU_ENTRY, menuEntryNum);
 
-	eepromSaveByte(EE_FREQ_1, (uint8_t)(SG.freq));
-	eepromSaveByte(EE_FREQ_2, (uint8_t)(SG.freq >> 8));
-	eepromSaveByte(EE_FREQ_3, (uint8_t)(SG.freq >> 16));
+// FIXME
+	//eepromSaveByte(EE_FREQ_1, (uint8_t)(SG.freq));
+	//eepromSaveByte(EE_FREQ_2, (uint8_t)(SG.freq >> 8));
+	//eepromSaveByte(EE_FREQ_3, (uint8_t)(SG.freq >> 16));
 
-	eepromSaveByte(EE_FREQ_STEP_1, (uint8_t)(SG.freqStep));
-	eepromSaveByte(EE_FREQ_STEP_2, (uint8_t)(SG.freqStep >> 8));
+	//eepromSaveByte(EE_FREQ_STEP_1, (uint8_t)(SG.freqStep));
+	//eepromSaveByte(EE_FREQ_STEP_2, (uint8_t)(SG.freqStep >> 8));
 
 	eepromSaveByte(EE_HS_FREQ, SG.hsFreq);
 
@@ -636,8 +639,8 @@ void saveSettings(void) {
 
 void initSettings(void) {
 	menuEntryNum = 0;
-	SG.freq      = 1000;
-	SG.freqStep  = 100;
+	SG.freq      = 1000.0;
+	SG.freqStep  = 100.0;
 	SG.hsFreq    = 1;    // default 1MHz HS signal freq
 	SG.pwmFreq   = 62500;
 	SG.pwmDuty   = 128;
@@ -655,12 +658,13 @@ void loadSettings(void) {
 
 	menuEntryNum = eepromLoadByte(EE_MENU_ENTRY);
 
-	SG.freq = ((uint32_t)eepromLoadByte(EE_FREQ_1))
-		| ((uint32_t)eepromLoadByte(EE_FREQ_2) << 8)
-		| ((uint32_t)eepromLoadByte(EE_FREQ_3) << 16);
+// FIXME
+	//SG.freq = ((uint32_t)eepromLoadByte(EE_FREQ_1))
+		//| ((uint32_t)eepromLoadByte(EE_FREQ_2) << 8)
+		//| ((uint32_t)eepromLoadByte(EE_FREQ_3) << 16);
 
-	SG.freqStep = ((uint32_t)eepromLoadByte(EE_FREQ_STEP_1))
-		    | ((uint32_t)eepromLoadByte(EE_FREQ_STEP_2) << 8);
+	//SG.freqStep = ((uint32_t)eepromLoadByte(EE_FREQ_STEP_1))
+		    //| ((uint32_t)eepromLoadByte(EE_FREQ_STEP_2) << 8);
 
 	SG.hsFreq = eepromLoadByte(EE_HS_FREQ);
 
@@ -738,22 +742,20 @@ void optMenu_onOpt(void) {
 
 void signal_updateDisplay(void) {
 	LCDGotoXY(0, 1);
-	printf("%6luHz", SG.freq);
+	printf("%10.3fHz", SG.freq);
 	CopyStringtoLCD(SG.running ? MNON : MNOFF, 13, 1);
 }
 
 void signal_onLeft(void) {
-	if((SG.freq - MIN_FREQ) >= SG.freqStep)
-		SG.freq -= SG.freqStep;
-	else
+	SG.freq -= SG.freqStep;
+	if(SG.freq < MIN_FREQ)
 		SG.freq = MIN_FREQ;
 	signal_updateDisplay();
 }
 
 void signal_onRight(void) {
-	if((MAX_FREQ - SG.freq) >= SG.freqStep)
-		SG.freq += SG.freqStep;
-	else
+	SG.freq += SG.freqStep;
+	if(SG.freq > MAX_FREQ)
 		SG.freq = MAX_FREQ;
 	signal_updateDisplay();
 }
@@ -781,7 +783,7 @@ void signal_start(void) {
 
 void signal_run(void) {
 	while(SG.running) {
-		uint32_t acc = SG.freq/RESOLUTION; // calculate accumulator value
+		uint32_t acc = SG.freq/(RESOLUTION*FREQ_CAL); // calculate accumulator value
 		SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
 
 		memcpy_P(signalBuffer, pgm_read_ptr(&SIGNALS[menuEntry.tag]), sizeof(signalBuffer));
@@ -837,22 +839,20 @@ void noise_onStart(void) {
 
 void freqStep_updateDisplay(void) {
 	LCDGotoXY(0, 1);
-	printf("    %5uHz", (uint16_t)SG.freqStep);
+	printf("%10.3fHz", SG.freqStep);
 }
 
 void freqStep_onLeft(void) {
-	if(SG.freqStep == 1)
-		SG.freqStep = 10000;
-	else
-		SG.freqStep /= 10;
+	SG.freqStep /= 10;
+	if(SG.freqStep < MIN_FREQ_STEP)
+		SG.freqStep = MIN_FREQ_STEP;
 	freqStep_updateDisplay();
 }
 
 void freqStep_onRight(void) {
-	if(SG.freqStep == 10000)
-		SG.freqStep = 1;
-	else
-		SG.freqStep *= 10;
+	SG.freqStep *= 10;
+	if(SG.freqStep > MAX_FREQ_STEP)
+		SG.freqStep = MAX_FREQ_STEP;
 	freqStep_updateDisplay();
 }
 
@@ -907,8 +907,19 @@ void hs_onStart(void) {
 }
 
 void pwm_updateDisplay(void) {
+	double freq;
+	switch(SG.pwmFreq) {
+		case 61:    freq = 61.04;     break;
+		case 244:   freq = 244.14;    break;
+		case 976:   freq = 976.56;    break;
+		case 7813:  freq = 7812.50;   break;
+		default:    freq = 62500.00;  break;
+	}
+
+	LCDGotoXY(13, 0);
+	printf("%3u", SG.pwmDuty);
 	LCDGotoXY(0, 1);
-	printf("%5uHz %3u", SG.pwmFreq, SG.pwmDuty);
+	printf("%8.2fHz", freq);
 	CopyStringtoLCD(SG.running ? MNON : MNOFF, 13, 1);
 }
 
@@ -1031,7 +1042,7 @@ void static inline signalOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, ui
 		"1:"								"\n\t"
 		"add r18, %[ad0]		; 1 cycle"			"\n\t"
 		"adc r19, %[ad1]		; 1 cycle"			"\n\t"	
-		"adc %A3, %[ad2]		; 1 cycle"			"\n\t"
+		"adc %A[sig], %[ad2]		; 1 cycle"			"\n\t"
 		"ld __tmp_reg__, Z 		; 2 cycles" 			"\n\t"
 		"out %[out], __tmp_reg__	; 1 cycle"			"\n\t"
 		"sbis %[cond], 2		; 1 cycle if no skip" 		"\n\t"
@@ -1062,42 +1073,43 @@ void static inline randomSignalOut(const uint8_t *signal)
 }
 
 void static inline sweepOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t ad0,
-                             uint8_t ad2inc, uint8_t ad1inc, uint8_t ad0inc)
+                             uint8_t ad2i, uint8_t ad1i, uint8_t ad0i)
 {
 	asm volatile(
-		"eor r18, r18 		; r18<-0"			"\n\t"
-		"eor r19, r19 		; r19<-0"			"\n\t"
-		"ldi r16, 11            ; "				"\n\t" // stop frequency
-		"ldi r17, 0             ; "				"\n\t"
-		"1:"							"\n\t"
-		"add r18, %0		; 1 cycle"			"\n\t"
-		"adc r19, %1		; 1 cycle"			"\n\t"	
-		"adc %A3, %2		; 1 cycle"			"\n\t"
-		"breq 2f		; 1 cycle if no jump" 		"\n\t"
-		"ld __tmp_reg__, Z	; 2 cycles" 			"\n\t"
-		"out %4, __tmp_reg__	; 1 cycle"			"\n\t"
-		"rjmp 1b		; 2 cycles. Total 9 cycles"	"\n\t"
-		"2:                     ; "				"\n\t"
-		"add %0, %6		; "				"\n\t"
-		"adc %1, %7		; "				"\n\t"
-		"adc %2, %8		; "				"\n\t"
-		"cp %2, r17		; "				"\n\t" // avoid frequency inc on next step at begin
-		"brne 3f		; "				"\n\t"
-		"inc %A3		; "				"\n\t"
-		"3:                     ; "				"\n\t"
-		"cp %2, r16		; "				"\n\t"
-		"sbis %5, 2		; "		 		"\n\t"
-		"brne 1b		; "				"\n\t"
+		"eor r18, r18 			; r18<-0"			"\n\t"
+		"eor r19, r19 			; r19<-0"			"\n\t"
+		"ldi r16, 11            	; "				"\n\t" // stop frequency
+		"ldi r17, 0             	; "				"\n\t"
+		"1:"								"\n\t"
+		"add r18, %[ad0]		; 1 cycle"			"\n\t"
+		"adc r19, %[ad1]		; 1 cycle"			"\n\t"	
+		"adc %A[sig], %[ad2]		; 1 cycle"			"\n\t"
+		"breq 2f			; 1 cycle if no jump" 		"\n\t"
+		"ld __tmp_reg__, Z		; 2 cycles" 			"\n\t"
+		"out %[out], __tmp_reg__	; 1 cycle"			"\n\t"
+		"rjmp 1b			; 2 cycles. Total 9 cycles"	"\n\t"
+		"2:                     	; "				"\n\t"
+		"add %[ad0], %[ad0i]		; "				"\n\t"
+		"adc %[ad1], %[ad1i]		; "				"\n\t"
+		"adc %[ad2], %[ad2i]		; "				"\n\t"
+		"cp %[ad2], r17			; "				"\n\t" // avoid frequency inc on next step at begin
+		"brne 3f			; "				"\n\t"
+		"inc %A[sig]			; "				"\n\t"
+		"3:             	        ; "				"\n\t"
+		"cp %[ad2], r16			; "				"\n\t"
+		"sbis %[cond], 2		; "		 		"\n\t"
+		"brne 1b			; "				"\n\t"
 		:
-		: "r"(ad0), "r"(ad1), "r"(ad2),                    // phase increment
-		  "z"(signal),                                     // signal source
-		  "I"(_SFR_IO_ADDR(R2RPORT)),                      // output port
-		  "I"(_SFR_IO_ADDR(SPCR)),                         // exit condition
-		  "r"(ad0inc), "r"(ad1inc), "r"(ad2inc)            // increment of the increment
+		: [ad0] "r"(ad0), [ad1] "r"(ad1), [ad2] "r"(ad2),      // phase increment
+		  [sig] "z"(signal),                                   // signal source
+		  [out] "I"(_SFR_IO_ADDR(R2RPORT)),                    // output port
+		  [cond] "I"(_SFR_IO_ADDR(SPCR)),                      // exit condition
+		  [ad0i] "r"(ad0i), [ad1i] "r"(ad1i), [ad2i] "r"(ad2i) // increment of the increment
 		: "r16", "r17", "r18", "r19"
 	);
 }
 
+// FIXME no HS-signal
 void timer1Start(uint8_t freqMHz)
 {
 	switch(freqMHz) {

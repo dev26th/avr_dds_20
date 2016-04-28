@@ -47,17 +47,7 @@
 #define HS      5
 
 // define eeprom addresses
-#define EE_MENU_ENTRY  0
-#define EE_FREQ_1      1
-#define EE_FREQ_2      2
-#define EE_FREQ_3      3
-#define EE_FREQ_STEP_1 4
-#define EE_FREQ_STEP_2 5
-#define EE_HS_FREQ     6
-#define EE_PWM_FREQ_1  7
-#define EE_PWM_FREQ_2  8
-#define EE_PWM_DUTY    9
-#define EE_OFF_LEVEL   10
+#define EE_CONFIG      0
 #define EE_INIT        E2END
 
 #define RESOLUTION (16000000.0/9/65536/256)  // (16000000 Hz system clock)/(9 clocks per iteration)
@@ -97,9 +87,16 @@ void noise_onStart(void);
 void hs_onLeft(void);
 void hs_onRight(void);
 void hs_onStart(void);
+void pwm_onUp(void);
+void pwm_onDown(void);
 void pwm_onLeft(void);
 void pwm_onRight(void);
 void pwm_onStart(void);
+void pwmHs_onUp(void);
+void pwmHs_onDown(void);
+void pwmHs_onLeft(void);
+void pwmHs_onRight(void);
+void pwmHs_onStart(void);
 void sweep_onStart(void);
 void offLevel_onLeft(void);
 void offLevel_onRight(void);
@@ -111,6 +108,7 @@ void noise_updateDisplay(void);
 void freqStep_updateDisplay(void);
 void hs_updateDisplay(void);
 void pwm_updateDisplay(void);
+void pwmHs_updateDisplay(void);
 void offLevel_updateDisplay(void);
 
 // adjust LCDsendChar() function for strema
@@ -129,202 +127,23 @@ struct ButtonHandlers {
 
 struct MenuEntry {
 	const char * title;
-	uint8_t tag;
+	const void * data;
 	MenuItemEnterHandlerFn_t * updateDisplay;
 	struct ButtonHandlers buttonHandlers;
 };
 
-const char SINE_TITLE[]      PROGMEM = "      Sine      ";
-const char SQUARE_TITLE[]    PROGMEM = "     Square     ";
-const char TRIANGLE_TITLE[]  PROGMEM = "    Triangle    ";
-const char SAW_TITLE[]       PROGMEM = "    SawTooth    ";
-const char REV_SAW_TITLE[]   PROGMEM = "  Rev SawTooth  ";
-const char ECG_TITLE[]       PROGMEM = "      ECG       ";
-const char FREQ_STEP_TITLE[] PROGMEM = "    Freq Step   ";
-const char NOISE_TITLE[]     PROGMEM = "     Noise      ";
-const char HS_TITLE[]        PROGMEM = "   High Speed   ";
-const char PWM_TITLE[]       PROGMEM = "    PWM (HS)    ";
-const char SWEEP_TITLE[]     PROGMEM = "     Sweep      ";
-const char OFF_LEVEL_TITLE[] PROGMEM = "   Off Level    ";
-
-const struct MenuEntry MENU[] PROGMEM = {
-	{
-		SINE_TITLE,
-		0,
-		signal_updateDisplay,
-		{
-			menu_onUp,
-			menu_onDown,
-			signal_onLeft,
-			signal_onRight,
-			signal_onStart,
-			menu_onOpt,
-		}
-	},
-	{
-		SQUARE_TITLE,
-		1,
-		signal_updateDisplay,
-		{
-			menu_onUp,
-			menu_onDown,
-			signal_onLeft,
-			signal_onRight,
-			signal_onStart,
-			menu_onOpt,
-		}
-	},
-	{
-		TRIANGLE_TITLE,
-		2,
-		signal_updateDisplay,
-		{
-			menu_onUp,
-			menu_onDown,
-			signal_onLeft,
-			signal_onRight,
-			signal_onStart,
-			menu_onOpt,
-		}
-	},
-	{
-		SAW_TITLE,
-		3,
-		signal_updateDisplay,
-		{
-			menu_onUp,
-			menu_onDown,
-			signal_onLeft,
-			signal_onRight,
-			signal_onStart,
-			menu_onOpt,
-		}
-	},
-	{
-		REV_SAW_TITLE,
-		4,
-		signal_updateDisplay,
-		{
-			menu_onUp,
-			menu_onDown,
-			signal_onLeft,
-			signal_onRight,
-			signal_onStart,
-			menu_onOpt,
-		}
-	},
-	{
-		ECG_TITLE,
-		5,
-		signal_updateDisplay,
-		{
-			menu_onUp,
-			menu_onDown,
-			signal_onLeft,
-			signal_onRight,
-			signal_onStart,
-			menu_onOpt,
-		}
-	},
-	{
-		NOISE_TITLE,
-		0,
-		noise_updateDisplay,
-		{
-			menu_onUp,
-			menu_onDown,
-			buttonNop,
-			buttonNop,
-			noise_onStart,
-			menu_onOpt,
-		}
-	},
-	{
-		HS_TITLE,
-		0,
-		hs_updateDisplay,
-		{
-			menu_onUp,
-			menu_onDown,
-			hs_onLeft,
-			hs_onRight,
-			hs_onStart,
-			menu_onOpt,
-		}
-	},
-	{
-		PWM_TITLE,
-		0,
-		pwm_updateDisplay,
-		{
-			menu_onUp,
-			menu_onDown,
-			pwm_onLeft,
-			pwm_onRight,
-			pwm_onStart,
-			menu_onOpt,
-		}
-	},
-	{
-		SWEEP_TITLE,
-		0,
-		signal_updateDisplay,
-		{
-			menu_onUp,
-			menu_onDown,
-			signal_onLeft,
-			signal_onRight,
-			sweep_onStart,
-			menu_onOpt,
-		}
-	},
+struct Config {
+	uint8_t  menuEntry;	// active or last active main menu entry
+	double   freq;		// frequency value
+	uint8_t  hsFreq;	// high speed frequency [1..8Mhz]
+	double   freqStep;	// frequency step value
+	uint16_t pwmFreq;	// PWM freq [61..62500Hz]
+	uint8_t  pwmDuty;
+	uint8_t  offLevel;	// output value when then generator if off
 };
-static const uint8_t MENU_SIZE = (sizeof(MENU)/sizeof(MENU[0]));
 
-const struct MenuEntry OPT_MENU[] PROGMEM = {
-	{
-		FREQ_STEP_TITLE,
-		0,
-		freqStep_updateDisplay,
-		{
-			optMenu_onUp,
-			optMenu_onDown,
-			freqStep_onLeft,
-			freqStep_onRight,
-			optMenu_onOpt,
-			optMenu_onOpt,
-		}
-	},
-	{
-		OFF_LEVEL_TITLE,
-		0,
-		offLevel_updateDisplay,
-		{
-			optMenu_onUp,
-			optMenu_onDown,
-			offLevel_onLeft,
-			offLevel_onRight,
-			optMenu_onOpt,
-			optMenu_onOpt,
-		}
-	},
-};
-static const uint8_t OPT_MENU_SIZE = (sizeof(OPT_MENU)/sizeof(OPT_MENU[0]));
-
-//various LCD strings
-const char MNON[]  PROGMEM = "ON ";
-const char MNOFF[] PROGMEM = "OFF";
-const char RND[]   PROGMEM = "    Random";
-
-struct signal {
-	volatile double   freq;		// frequency value
-	volatile bool     running;	// generator on/off
-	volatile uint8_t  hsFreq;	// high speed frequency [1..8Mhz]
-	volatile double   freqStep;	// frequency step value
-	volatile uint16_t pwmFreq;	// PWM freq [61..62500Hz]
-	volatile uint8_t  pwmDuty;
-	volatile uint8_t  offLevel;     // output value when then generator if off
-} SG;
+struct Config config;
+volatile bool running; // generator on/off
 
 //define signals
 const uint8_t SINE_WAVE[] PROGMEM = {
@@ -490,9 +309,201 @@ const uint8_t * const SIGNALS[] PROGMEM = {
 	ECG_WAVE
 };
 
-const uint8_t * const SWEEP_SIGNALS[] PROGMEM = {
-	SINE_WAVE_FROM_ZERO
+const char SINE_TITLE[]      PROGMEM = "      Sine      ";
+const char SQUARE_TITLE[]    PROGMEM = "     Square     ";
+const char TRIANGLE_TITLE[]  PROGMEM = "    Triangle    ";
+const char SAW_TITLE[]       PROGMEM = "    SawTooth    ";
+const char REV_SAW_TITLE[]   PROGMEM = "  Rev SawTooth  ";
+const char ECG_TITLE[]       PROGMEM = "      ECG       ";
+const char FREQ_STEP_TITLE[] PROGMEM = "    Freq Step   ";
+const char NOISE_TITLE[]     PROGMEM = "     Noise      ";
+const char HS_TITLE[]        PROGMEM = "   High Speed   ";
+const char PWM_TITLE[]       PROGMEM = "      PWM       ";
+const char PWM_HS_TITLE[]    PROGMEM = " PWM (HS)       ";
+const char SWEEP_TITLE[]     PROGMEM = "     Sweep      ";
+const char OFF_LEVEL_TITLE[] PROGMEM = "   Off Level    ";
+
+const struct MenuEntry MENU[] PROGMEM = {
+	{
+		SINE_TITLE,
+		SINE_WAVE,
+		signal_updateDisplay,
+		{
+			menu_onUp,
+			menu_onDown,
+			signal_onLeft,
+			signal_onRight,
+			signal_onStart,
+			menu_onOpt,
+		}
+	},
+	{
+		SQUARE_TITLE,
+		SQUARE_WAVE,
+		signal_updateDisplay,
+		{
+			menu_onUp,
+			menu_onDown,
+			signal_onLeft,
+			signal_onRight,
+			signal_onStart,
+			menu_onOpt,
+		}
+	},
+	{
+		TRIANGLE_TITLE,
+		TRIANGLE_WAVE,
+		signal_updateDisplay,
+		{
+			menu_onUp,
+			menu_onDown,
+			signal_onLeft,
+			signal_onRight,
+			signal_onStart,
+			menu_onOpt,
+		}
+	},
+	{
+		SAW_TITLE,
+		SAWTOOTH_WAVE,
+		signal_updateDisplay,
+		{
+			menu_onUp,
+			menu_onDown,
+			signal_onLeft,
+			signal_onRight,
+			signal_onStart,
+			menu_onOpt,
+		}
+	},
+	{
+		REV_SAW_TITLE,
+		REV_SAWTOOTH_WAVE,
+		signal_updateDisplay,
+		{
+			menu_onUp,
+			menu_onDown,
+			signal_onLeft,
+			signal_onRight,
+			signal_onStart,
+			menu_onOpt,
+		}
+	},
+	{
+		ECG_TITLE,
+		ECG_WAVE,
+		signal_updateDisplay,
+		{
+			menu_onUp,
+			menu_onDown,
+			signal_onLeft,
+			signal_onRight,
+			signal_onStart,
+			menu_onOpt,
+		}
+	},
+	{
+		NOISE_TITLE,
+		NULL,
+		noise_updateDisplay,
+		{
+			menu_onUp,
+			menu_onDown,
+			buttonNop,
+			buttonNop,
+			noise_onStart,
+			menu_onOpt,
+		}
+	},
+	{
+		HS_TITLE,
+		NULL,
+		hs_updateDisplay,
+		{
+			menu_onUp,
+			menu_onDown,
+			hs_onLeft,
+			hs_onRight,
+			hs_onStart,
+			menu_onOpt,
+		}
+	},
+	{
+		PWM_TITLE,
+		NULL,
+		pwm_updateDisplay,
+		{
+			pwm_onUp,
+			pwm_onDown,
+			signal_onLeft,
+			signal_onRight,
+			pwm_onStart,
+			menu_onOpt,
+		}
+	},
+	{
+		PWM_HS_TITLE,
+		NULL,
+		pwmHs_updateDisplay,
+		{
+			pwmHs_onUp,
+			pwmHs_onDown,
+			pwmHs_onLeft,
+			pwmHs_onRight,
+			pwmHs_onStart,
+			menu_onOpt,
+		}
+	},
+	{
+		SWEEP_TITLE,
+		NULL,
+		signal_updateDisplay,
+		{
+			menu_onUp,
+			menu_onDown,
+			signal_onLeft,
+			signal_onRight,
+			sweep_onStart,
+			menu_onOpt,
+		}
+	},
 };
+static const uint8_t MENU_SIZE = (sizeof(MENU)/sizeof(MENU[0]));
+
+const struct MenuEntry OPT_MENU[] PROGMEM = {
+	{
+		FREQ_STEP_TITLE,
+		NULL,
+		freqStep_updateDisplay,
+		{
+			optMenu_onUp,
+			optMenu_onDown,
+			freqStep_onLeft,
+			freqStep_onRight,
+			optMenu_onOpt,
+			optMenu_onOpt,
+		}
+	},
+	{
+		OFF_LEVEL_TITLE,
+		NULL,
+		offLevel_updateDisplay,
+		{
+			optMenu_onUp,
+			optMenu_onDown,
+			offLevel_onLeft,
+			offLevel_onRight,
+			optMenu_onOpt,
+			optMenu_onOpt,
+		}
+	},
+};
+static const uint8_t OPT_MENU_SIZE = (sizeof(OPT_MENU)/sizeof(OPT_MENU[0]));
+
+//various LCD strings
+const char MNON[]  PROGMEM = "ON ";
+const char MNOFF[] PROGMEM = "OFF";
+const char RND[]   PROGMEM = "    Random";
 
 enum Button {
 	Button_None,
@@ -518,7 +529,6 @@ static const uint16_t BUTTON_AUTO_START  = 100;
 static const uint16_t BUTTON_AUTO_REPEAT = 8;
 static const uint16_t BUTTON_TIME_WRAP   = 32768;
 
-uint8_t menuEntryNum = 0;                // active or last active main menu entry
 uint8_t optMenuEntryNum = (uint8_t)-1;   // active opt-menu entry or -1 if not in the opt-menu
 struct MenuEntry menuEntry;              // copy of active menu entry
 struct ButtonHandlers * buttonHandlers;
@@ -609,42 +619,18 @@ void checkButtons(void) {
 	}
 }
 
-uint8_t eepromLoadByte(uint16_t addr) {
-	return eeprom_read_byte((uint8_t*)addr);
-}
-
-void eepromSaveByte(uint16_t addr, uint8_t v) {
-	if(eeprom_read_byte((uint8_t*)addr) != v)  eeprom_write_byte((uint8_t*)addr, v);
-}
-
 void saveSettings(void) {
-	eepromSaveByte(EE_MENU_ENTRY, menuEntryNum);
-
-// FIXME
-	//eepromSaveByte(EE_FREQ_1, (uint8_t)(SG.freq));
-	//eepromSaveByte(EE_FREQ_2, (uint8_t)(SG.freq >> 8));
-	//eepromSaveByte(EE_FREQ_3, (uint8_t)(SG.freq >> 16));
-
-	//eepromSaveByte(EE_FREQ_STEP_1, (uint8_t)(SG.freqStep));
-	//eepromSaveByte(EE_FREQ_STEP_2, (uint8_t)(SG.freqStep >> 8));
-
-	eepromSaveByte(EE_HS_FREQ, SG.hsFreq);
-
-	eepromSaveByte(EE_PWM_FREQ_1, (uint8_t)(SG.pwmFreq));
-	eepromSaveByte(EE_PWM_FREQ_2, (uint8_t)(SG.pwmFreq >> 8));
-
-	eepromSaveByte(EE_PWM_DUTY, SG.pwmDuty);
-	eepromSaveByte(EE_OFF_LEVEL, SG.offLevel);
+	eeprom_update_block(&config, EE_CONFIG, sizeof(config));
 }
 
 void initSettings(void) {
-	menuEntryNum = 0;
-	SG.freq      = 1000.0;
-	SG.freqStep  = 100.0;
-	SG.hsFreq    = 1;    // default 1MHz HS signal freq
-	SG.pwmFreq   = 62500;
-	SG.pwmDuty   = 128;
-	SG.offLevel  = 0x80; // middle of the scale
+	config.menuEntry = 0;
+	config.freq      = 1000.0;
+	config.freqStep  = 100.0;
+	config.hsFreq    = 1;    // default 1MHz HS signal freq
+	config.pwmFreq   = 62500;
+	config.pwmDuty   = 127;
+	config.offLevel  = 0x80; // middle of the scale
 	
 	saveSettings();
 	eeprom_write_byte((uint8_t*)EE_INIT, 'T');   // marks once that eeprom init is done
@@ -652,34 +638,18 @@ void initSettings(void) {
 }
 
 void loadSettings(void) {
-	if(eepromLoadByte(EE_INIT) != 'T') {
+	if(eeprom_read_byte((uint8_t*)EE_INIT) != 'T') {
 		initSettings();
 	}
 
-	menuEntryNum = eepromLoadByte(EE_MENU_ENTRY);
-
-// FIXME
-	//SG.freq = ((uint32_t)eepromLoadByte(EE_FREQ_1))
-		//| ((uint32_t)eepromLoadByte(EE_FREQ_2) << 8)
-		//| ((uint32_t)eepromLoadByte(EE_FREQ_3) << 16);
-
-	//SG.freqStep = ((uint32_t)eepromLoadByte(EE_FREQ_STEP_1))
-		    //| ((uint32_t)eepromLoadByte(EE_FREQ_STEP_2) << 8);
-
-	SG.hsFreq = eepromLoadByte(EE_HS_FREQ);
-
-	SG.pwmFreq = ((uint16_t)eepromLoadByte(EE_PWM_FREQ_1))
-		   | ((uint16_t)eepromLoadByte(EE_PWM_FREQ_2) << 8);
-
-	SG.pwmDuty = eepromLoadByte(EE_PWM_DUTY);
-	SG.offLevel = eepromLoadByte(EE_OFF_LEVEL);
+	eeprom_read_block(&config, EE_CONFIG, sizeof(config));
 }
 
 void buttonNop(void) {
 }
 
 void onNewMenuEntry(void) {
-	memcpy_P(&menuEntry, &MENU[menuEntryNum], sizeof(menuEntry));
+	memcpy_P(&menuEntry, &MENU[config.menuEntry], sizeof(menuEntry));
 	buttonHandlers = &menuEntry.buttonHandlers;
 
 	LCDclr();
@@ -688,17 +658,17 @@ void onNewMenuEntry(void) {
 }
 
 void menu_onUp(void) {
-	if(!SG.running) {
-		if(menuEntryNum == 0) menuEntryNum = MENU_SIZE - 1;
-		else                  --menuEntryNum;
+	if(!running) {
+		if(config.menuEntry == 0) config.menuEntry = MENU_SIZE - 1;
+		else                      --config.menuEntry;
 		onNewMenuEntry();
 	}
 }
 
 void menu_onDown(void) {
-	if(!SG.running) {
-		++menuEntryNum;
-		if(menuEntryNum == MENU_SIZE) menuEntryNum = 0;
+	if(!running) {
+		++config.menuEntry;
+		if(config.menuEntry == MENU_SIZE) config.menuEntry = 0;
 		onNewMenuEntry();
 	}
 }
@@ -713,14 +683,14 @@ void onNewOptMenuEntry(void) {
 }
 
 void menu_onOpt(void) {
-	if(!SG.running) {
+	if(!running) {
 		optMenuEntryNum = 0;
 		onNewOptMenuEntry();
 	}
 }
 
 void optMenu_onUp(void) {
-	if(!SG.running) {
+	if(!running) {
 		if(optMenuEntryNum == 0) optMenuEntryNum = OPT_MENU_SIZE - 1;
 		else                     --optMenuEntryNum;
 		onNewOptMenuEntry();
@@ -728,7 +698,7 @@ void optMenu_onUp(void) {
 }
 
 void optMenu_onDown(void) {
-	if(!SG.running) {
+	if(!running) {
 		++optMenuEntryNum;
 		if(optMenuEntryNum == OPT_MENU_SIZE) optMenuEntryNum = 0;
 		onNewOptMenuEntry();
@@ -742,21 +712,21 @@ void optMenu_onOpt(void) {
 
 void signal_updateDisplay(void) {
 	LCDGotoXY(0, 1);
-	printf("%10.3fHz", SG.freq);
-	CopyStringtoLCD(SG.running ? MNON : MNOFF, 13, 1);
+	printf("%10.3fHz", config.freq);
+	CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
 }
 
 void signal_onLeft(void) {
-	SG.freq -= SG.freqStep;
-	if(SG.freq < MIN_FREQ)
-		SG.freq = MIN_FREQ;
+	config.freq -= config.freqStep;
+	if(config.freq < MIN_FREQ)
+		config.freq = MIN_FREQ;
 	signal_updateDisplay();
 }
 
 void signal_onRight(void) {
-	SG.freq += SG.freqStep;
-	if(SG.freq > MAX_FREQ)
-		SG.freq = MAX_FREQ;
+	config.freq += config.freqStep;
+	if(config.freq > MAX_FREQ)
+		config.freq = MAX_FREQ;
 	signal_updateDisplay();
 }
 
@@ -775,56 +745,60 @@ void enableMenu(void) {
 void signal_start(void) {
 	saveSettings();
 
-	SG.running = true;
+	running = true;
 
 	menuEntry.updateDisplay();
 	disableMenu();
 }
 
+void signal_continue(void) {
+	uint32_t acc = config.freq/(RESOLUTION*FREQ_CAL); // calculate accumulator value
+	SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
+
+	signalOut(signalBuffer,
+		(uint8_t)(acc >> 16),
+		(uint8_t)(acc >> 8),
+		(uint8_t)acc);
+	R2RPORT = config.offLevel;
+
+	// generation is interrupted, but not stopped - check buttons and continue
+	enableMenu();
+	while(buttonState.pressed != Button_None) {
+		processButton();
+	}
+	disableMenu();
+}
+
 void signal_run(void) {
-	while(SG.running) {
-		uint32_t acc = SG.freq/(RESOLUTION*FREQ_CAL); // calculate accumulator value
-		SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
-
-		memcpy_P(signalBuffer, pgm_read_ptr(&SIGNALS[menuEntry.tag]), sizeof(signalBuffer));
-		signalOut(signalBuffer,
-			(uint8_t)(acc >> 16),
-			(uint8_t)(acc >> 8),
-			(uint8_t)acc);
-		R2RPORT = SG.offLevel;
-
-		// generation is interrupted, but not stopped - check buttons and continue
-		enableMenu();
-		while(buttonState.pressed != Button_None) {
-			processButton();
-		}
-		disableMenu();
+	while(running) {
+		memcpy_P(signalBuffer, (const uint8_t *)menuEntry.data, sizeof(signalBuffer));
+		signal_continue();
 	}
 }
 
 void signal_stop(void) {
 	enableMenu();
-	SG.running = false;
-	R2RPORT = SG.offLevel;
+	running = false;
+	R2RPORT = config.offLevel;
 	menuEntry.updateDisplay();
 	while(buttonState.pressed != Button_None); // wait until button release, otherwise the generation will be started again
 }
 
 void signal_onStart(void) {
-	if(!SG.running) {
+	if(!running) {
 		signal_start();
 		signal_run();
 		signal_stop();
 	}
 	else {
-		SG.running = false;
+		running = false;
 	}
 }
 
 void noise_updateDisplay(void) {
 	LCDGotoXY(0, 1);
 	CopyStringtoLCD(RND, 0, 1);
-	CopyStringtoLCD(SG.running ? MNON : MNOFF, 13, 1);
+	CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
 }
 
 void noise_onStart(void) {
@@ -839,66 +813,62 @@ void noise_onStart(void) {
 
 void freqStep_updateDisplay(void) {
 	LCDGotoXY(0, 1);
-	printf("%10.3fHz", SG.freqStep);
+	printf("%10.3fHz", config.freqStep);
 }
 
 void freqStep_onLeft(void) {
-	SG.freqStep /= 10;
-	if(SG.freqStep < MIN_FREQ_STEP)
-		SG.freqStep = MIN_FREQ_STEP;
+	config.freqStep /= 10;
+	if(config.freqStep < MIN_FREQ_STEP)
+		config.freqStep = MIN_FREQ_STEP;
 	freqStep_updateDisplay();
 }
 
 void freqStep_onRight(void) {
-	SG.freqStep *= 10;
-	if(SG.freqStep > MAX_FREQ_STEP)
-		SG.freqStep = MAX_FREQ_STEP;
+	config.freqStep *= 10;
+	if(config.freqStep > MAX_FREQ_STEP)
+		config.freqStep = MAX_FREQ_STEP;
 	freqStep_updateDisplay();
 }
 
 void hs_updateDisplay(void) {
 	LCDGotoXY(0, 1);
-	printf(" %5uMHz", SG.hsFreq);
-	CopyStringtoLCD(SG.running ? MNON : MNOFF, 13, 1);
+	printf(" %5uMHz", config.hsFreq);
+	CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
 }
 
 void hs_restart(void) {
-	if(SG.running)  {
-		timer1Start(SG.hsFreq);
+	if(running)  {
+		timer1Start(config.hsFreq);
 	}
 }
 
 void hs_onLeft(void) {
-	if(SG.hsFreq == 1)
-		SG.hsFreq = 8;
-	else
-		SG.hsFreq /= 2;
+	if(config.hsFreq != 1)
+		config.hsFreq /= 2;
 	hs_updateDisplay();
 	hs_restart();
 }
 
 void hs_onRight(void) {
-	if(SG.hsFreq == 8)
-		SG.hsFreq = 1;
-	else
-		SG.hsFreq *= 2;
+	if(config.hsFreq != 8)
+		config.hsFreq *= 2;
 	hs_updateDisplay();
 	hs_restart();
 }
 
 void hs_onStart(void) {
-	if(SG.running) {
-		SG.running = false;
+	if(running) {
+		running = false;
 		timer1Stop();
 		HSPORT &= ~(1<<HS);   // set HS pin to LOW FIXME sometimes it stays in HIGH
 	}
 	else {
 		saveSettings();
-		SG.running = true;
+		running = true;
 		menuEntry.updateDisplay();
 
 		hs_restart();
-		while(SG.running) {
+		while(running) {
 			processButton();
 		}
 
@@ -906,9 +876,60 @@ void hs_onStart(void) {
 	}
 }
 
+void pwm_displayDuty(void) {
+	LCDGotoXY(10, 0);
+	printf("%5.1f%%", ((double)config.pwmDuty+1) / 256 * 100);
+}
+
 void pwm_updateDisplay(void) {
+	signal_updateDisplay();
+	pwm_displayDuty();
+}
+
+void pwm_run(void) {
+	while(running) {
+		for(uint8_t i = 0; ; ++i) {
+			signalBuffer[i] = (i <= config.pwmDuty) ? 255 : 0;
+			if(i == 255) break;
+		}
+		signal_continue();
+	}
+}
+
+void pwm_onStart(void) {
+	if(!running) {
+		signal_start();
+		pwm_run();
+		signal_stop();
+	}
+	else {
+		running = false;
+	}
+}
+
+void pwm_onUp(void) {
+	if(!running) {
+		menu_onUp();
+	}
+	else {
+		if(config.pwmDuty < 255) ++config.pwmDuty;
+		pwm_updateDisplay();
+	}
+}
+
+void pwm_onDown(void) {
+	if(!running) {
+		menu_onDown();
+	}
+	else {
+		if(config.pwmDuty > 0) --config.pwmDuty;
+		pwm_updateDisplay();
+	}
+}
+
+void pwmHs_updateDisplay(void) {
 	double freq;
-	switch(SG.pwmFreq) {
+	switch(config.pwmFreq) {
 		case 61:    freq = 61.04;     break;
 		case 244:   freq = 244.14;    break;
 		case 976:   freq = 976.56;    break;
@@ -916,27 +937,26 @@ void pwm_updateDisplay(void) {
 		default:    freq = 62500.00;  break;
 	}
 
-	LCDGotoXY(13, 0);
-	printf("%3u", SG.pwmDuty);
+	pwm_displayDuty();
 	LCDGotoXY(0, 1);
 	printf("%8.2fHz", freq);
-	CopyStringtoLCD(SG.running ? MNON : MNOFF, 13, 1);
+	CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
 }
 
-void pwm_onStart(void) {
-	if(SG.running) {
-		SG.running = false;
+void pwmHs_onStart(void) {
+	if(running) {
+		running = false;
 		timer1Stop();
 		HSPORT &= ~(1 << HS);   // set HS pin to LOW
 	}
 	else {
 		saveSettings();
-		SG.running = true;
+		running = true;
 		menuEntry.updateDisplay();
 
-		OCR1A = SG.pwmDuty;
-		timer1StartPwm(SG.pwmFreq);
-		while(SG.running) {
+		while(running) {
+			OCR1A = config.pwmDuty;
+			timer1StartPwm(config.pwmFreq);
 			processButton();
 		}
 
@@ -944,49 +964,57 @@ void pwm_onStart(void) {
 	}
 }
 
-void pwm_onLeft(void) {
-	if(!SG.running) {
-		switch(SG.pwmFreq) {
-			case 61:    SG.pwmFreq = 62500; break;
-			case 244:   SG.pwmFreq = 61;    break;
-			case 976:   SG.pwmFreq = 244;   break;
-			case 7813:  SG.pwmFreq = 976;   break;
-			case 62500: SG.pwmFreq = 7813;  break;
-		}
-		pwm_updateDisplay();
+void pwmHs_onUp(void) {
+	if(!running) {
+		menu_onUp();
 	}
 	else {
-		if(SG.pwmDuty > 0) --SG.pwmDuty;
-		OCR1A = SG.pwmDuty;
-		pwm_updateDisplay();
+		if(config.pwmDuty < 255) ++config.pwmDuty;
+		OCR1A = config.pwmDuty;
+		pwmHs_updateDisplay();
 	}
 }
 
-void pwm_onRight(void) {
-	if(!SG.running) {
-		switch(SG.pwmFreq) {
-			case 61:    SG.pwmFreq = 244;   break;
-			case 244:   SG.pwmFreq = 976;   break;
-			case 976:   SG.pwmFreq = 7813;  break;
-			case 7813:  SG.pwmFreq = 62500; break;
-			case 62500: SG.pwmFreq = 61;    break;
-		}
-		pwm_updateDisplay();
+void pwmHs_onDown(void) {
+	if(!running) {
+		menu_onDown();
 	}
 	else {
-		if(SG.pwmDuty < 255) ++SG.pwmDuty;
-		OCR1A = SG.pwmDuty;
-		pwm_updateDisplay();
+		if(config.pwmDuty > 0) --config.pwmDuty;
+		OCR1A = config.pwmDuty;
+		pwmHs_updateDisplay();
 	}
+}
+
+void pwmHs_onLeft(void) {
+	switch(config.pwmFreq) {
+		case 61:    ;                       break;
+		case 244:   config.pwmFreq = 61;    break;
+		case 976:   config.pwmFreq = 244;   break;
+		case 7813:  config.pwmFreq = 976;   break;
+		case 62500: config.pwmFreq = 7813;  break;
+	}
+	pwmHs_updateDisplay();
+}
+
+void pwmHs_onRight(void) {
+	switch(config.pwmFreq) {
+		case 61:    config.pwmFreq = 244;   break;
+		case 244:   config.pwmFreq = 976;   break;
+		case 976:   config.pwmFreq = 7813;  break;
+		case 7813:  config.pwmFreq = 62500; break;
+		case 62500: ;                       break;
+	}
+	pwmHs_updateDisplay();
 }
 
 void sweep_onStart(void) {
 	saveSettings();
-	SG.running = true;
+	running = true;
 	menuEntry.updateDisplay();
 	disableMenu();
 
-	uint32_t acc = SG.freq/RESOLUTION; // calculate accumulator value
+	uint32_t acc = config.freq/RESOLUTION; // calculate accumulator value
 	SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
 
 	memcpy_P(signalBuffer, SINE_WAVE_FROM_ZERO, sizeof(signalBuffer));
@@ -999,24 +1027,24 @@ void sweep_onStart(void) {
 		1);
 
 	// output only once
-	SG.running = false;
+	running = false;
 	signal_stop();
 }
 
 void offLevel_updateDisplay(void) {
 	LCDGotoXY(0, 1);
-	printf("%3u", SG.offLevel);
+	printf("%3u", config.offLevel);
 }
 
 void offLevel_onLeft(void) {
-	if(SG.offLevel > 0) --SG.offLevel;
-	R2RPORT = SG.offLevel;
+	if(config.offLevel > 0) --config.offLevel;
+	R2RPORT = config.offLevel;
 	offLevel_updateDisplay();
 }
 
 void offLevel_onRight(void) {
-	if(SG.offLevel < 255) ++SG.offLevel;
-	R2RPORT = SG.offLevel;
+	if(config.offLevel < 255) ++config.offLevel;
+	R2RPORT = config.offLevel;
 	offLevel_updateDisplay();
 }
 
@@ -1154,10 +1182,10 @@ void init(void) {
 
 	loadSettings();
 
-	SG.running = false;
+	running = false;
 
 	// init DDS output
-	R2RPORT = SG.offLevel;
+	R2RPORT = config.offLevel;
 	R2RDDR  = 0xFF; // set A port as output
 
 	// set ports pins for buttons

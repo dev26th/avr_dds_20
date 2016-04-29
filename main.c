@@ -56,7 +56,7 @@
 #define SIGNAL_BUFFER_SIZE 256
 
 #define MIN_FREQ      0.0        // minimum DDS frequency
-#define MAX_FREQ      999999.9   // maximum DDS frequency
+#define MAX_FREQ      250000.0   // maximum DDS frequency
 #define MIN_FREQ_STEP 0.1        // minimum DDS frequency step
 #define MAX_FREQ_STEP 10000.0    // maximum DDS frequency step
 #define MIN_FREQ_INC  0.0        // minimum sweep frequency increment
@@ -64,6 +64,8 @@
 #define MIN_FREQ_CAL  0.09
 #define MAX_FREQ_CAL  1.01
 #define STEP_FREQ_CAL 0.00001
+#define MIN_PULSE     0.001      // minimum pulse duration, ms
+#define MAX_PULSE     1000.0     // maximum pulse duration, ms
 
 void timer2Init(void);
 void timer2Start(void);
@@ -91,6 +93,9 @@ void signal_onStart(void);
 void freqStep_onLeft(void);
 void freqStep_onRight(void);
 void noise_onStart(void);
+void pulse_onStart(void);
+void pulse_onLeft(void);
+void pulse_onRight(void);
 void hs_onLeft(void);
 void hs_onRight(void);
 void hs_onStart(void);
@@ -119,6 +124,7 @@ void calFreq_onStart(void);
 typedef void (MenuItemEnterHandlerFn_t)(void);
 void signal_updateDisplay(void);
 void noise_updateDisplay(void);
+void pulse_updateDisplay(void);
 void freqStep_updateDisplay(void);
 void hs_updateDisplay(void);
 void pwm_updateDisplay(void);
@@ -150,15 +156,16 @@ struct MenuEntry {
 
 struct Config {
 	uint8_t  menuEntry;	// active or last active main menu entry
-	double   freq;		// frequency value
+	double   freq;		// frequency value, Hz
 	double   freqCal;	// frequence calibration coefficient
-	double   freqEnd;	// end frequency for sweep
-	double   freqInc;	// frequency increment for sweep
-	uint8_t  hsFreq;	// high speed frequency [1..8Mhz]
-	double   freqStep;	// frequency step value
-	uint16_t pwmFreq;	// PWM freq [61..62500Hz]
+	double   freqEnd;	// end frequency for sweep, Hz
+	double   freqInc;	// frequency increment for sweep, Hz
+	uint8_t  hsFreq;	// high speed frequency [1..8 MHz]
+	double   freqStep;	// frequency step value, Hz
+	uint16_t pwmFreq;	// PWM freq [61..62500 Hz]
 	uint8_t  pwmDuty;
 	uint8_t  offLevel;	// output value when then generator if off
+	double   pulse;         // pulse duration, ms
 };
 
 struct Config config = {
@@ -172,6 +179,7 @@ struct Config config = {
 	.pwmFreq   = 62500,
 	.pwmDuty   = 127,
 	.offLevel  = 0x80,        // middle of the scale
+	.pulse     = 1,
 };
 
 volatile bool running; // generator on/off
@@ -348,6 +356,7 @@ const char REV_SAW_TITLE[]   PROGMEM = "  Rev SawTooth  ";
 const char ECG_TITLE[]       PROGMEM = "      ECG       ";
 const char FREQ_STEP_TITLE[] PROGMEM = "    Freq Step   ";
 const char NOISE_TITLE[]     PROGMEM = "     Noise      ";
+const char PULSE_TITLE[]     PROGMEM = "     Pulse      ";
 const char HS_TITLE[]        PROGMEM = "   High Speed   ";
 const char PWM_TITLE[]       PROGMEM = "      PWM       ";
 const char PWM_HS_TITLE[]    PROGMEM = " PWM (HS)       ";
@@ -446,6 +455,19 @@ const struct MenuEntry MENU[] PROGMEM = {
 			buttonNop,
 			buttonNop,
 			noise_onStart,
+			menu_onOpt,
+		}
+	},
+	{
+		PULSE_TITLE,
+		NULL,
+		pulse_updateDisplay,
+		{
+			menu_onUp,
+			menu_onDown,
+			pulse_onLeft,
+			pulse_onRight,
+			pulse_onStart,
 			menu_onOpt,
 		}
 	},
@@ -856,6 +878,123 @@ void noise_onStart(void) {
 	randomSignalOut(signalBuffer);
 
 	signal_stop();
+}
+
+void pulse_updateDisplay(void) {
+	LCDGotoXY(0, 1);
+	if(config.pulse == -INFINITY) {
+		printf("until release   ");
+	}
+	else if(config.pulse == 0.0) {
+		printf("min             ");
+	}
+	else if(config.pulse == INFINITY) {
+		printf("until stop   ");
+		CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
+	}
+	else {
+		printf("%8.3fms      ", config.pulse);
+	}
+}
+
+void pulse_onLeft(void) {
+	if(!running) {
+		if(config.pulse == -INFINITY) {
+		}
+		else if(config.pulse == 0.0) {
+			config.pulse = -INFINITY;
+		}
+		else if(config.pulse == INFINITY) {
+			config.pulse = MAX_PULSE;
+		}
+		else {
+			config.pulse -= config.freqStep / 100;
+			if(config.pulse < MIN_PULSE)
+				config.pulse = 0.0;
+		}
+		pulse_updateDisplay();
+	}
+}
+
+void pulse_onRight(void) {
+	if(!running) {
+		if(config.pulse == -INFINITY) {
+			config.pulse = 0.0;
+		}
+		else if(config.pulse == 0.0) {
+			config.pulse = MIN_PULSE;
+		}
+		else if(config.pulse == INFINITY) {
+		}
+		else {
+			config.pulse += config.freqStep / 100;
+			if(config.pulse > MAX_PULSE)
+				config.pulse = INFINITY;
+		}
+		pulse_updateDisplay();
+	}
+}
+
+void pulse_onStart(void) {
+	if(!running) {
+		if(config.pulse == -INFINITY) {
+			HSPORT |=  (1 << HS);
+			R2RPORT = 0xFF;
+			CopyStringtoLCD(MNON, 13, 1);
+			while(buttonState.pressed != Button_None) {
+				processButton();
+			}
+			HSPORT &= ~(1 << HS);
+			R2RPORT = config.offLevel;
+			CopyStringtoLCD(MNOFF, 13, 1);
+		}
+		else if(config.pulse == INFINITY) {
+			HSPORT |=  (1 << HS);
+			R2RPORT = 0xFF;
+			CopyStringtoLCD(MNON, 13, 1);
+			running = true;
+			while(running) {
+				processButton();
+			}
+			HSPORT &= ~(1 << HS);
+			R2RPORT = config.offLevel;
+			CopyStringtoLCD(MNOFF, 13, 1);
+		}
+		else if(config.pulse == 0.0) {
+			R2RPORT = 0xFF;
+			HSPORT |=  (1 << HS);
+			HSPORT &= ~(1 << HS);
+			R2RPORT = config.offLevel;
+		}
+		else {
+			uint32_t count = (double)(CPU_FREQ / 1000) * config.pulse / 6;
+			CopyStringtoLCD(MNON, 13, 1);
+			R2RPORT = 0xFF;
+			HSPORT |=  (1 << HS);
+
+			asm volatile(
+				// takes 6 cycles
+				"1:" "\n\t"
+				"subi %[c0], 1		; 1 c" 		"\n\t"
+				"sbci %[c1], 0 		; 1 c" 		"\n\t"
+				"sbci %[c2], 0 		; 1 c" 		"\n\t"
+				"sbci %[c3], 0 		; 1 c" 		"\n\t"
+				"brne 1b 		; 2 c" 		"\n\t"
+				:
+				: [c3] "d"((uint8_t)(count >> 24)),
+				  [c2] "d"((uint8_t)(count >> 16)),
+				  [c1] "d"((uint8_t)(count >> 8)),
+				  [c0] "d"((uint8_t)count)
+			);
+		
+			HSPORT &= ~(1 << HS);
+			R2RPORT = config.offLevel;
+			CopyStringtoLCD(MNOFF, 13, 1);
+		}
+	}
+	else {
+		running = false;
+	}
 }
 
 void freqStep_updateDisplay(void) {

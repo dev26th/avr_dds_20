@@ -42,16 +42,19 @@
 #define BTN_INT 2
 
 // define Highs Speed (HS) signal output (PD5)
-#define HSDDR   DDRD
-#define HSPORT  PORTD
-#define HS      5
+#define HSDDR         DDRD
+#define HSPORT        PORTD
+#define HS            5
+#define SYNCPORT      PORTD
+#define SYNC          7
 
 // define eeprom addresses
-#define EE_CONFIG      0
-#define EE_INIT        E2END
+#define EE_CONFIG     0
+#define EE_INIT       E2END
 
 #define CPU_FREQ           16000000ul
 #define OUT_TICKS          9
+#define OUT_SYNC_TICKS     14
 #define ACC_FRAC_BITS      16
 #define SIGNAL_BUFFER_SIZE 256
 
@@ -74,6 +77,7 @@ void timer1Start(uint8_t);
 void timer1StartPwm(uint16_t);
 void timer1Stop(void);
 void static signalOut(const uint8_t *, uint8_t, uint8_t, uint8_t);
+void static signalWithSyncOut(const uint8_t *, uint8_t, uint8_t, uint8_t);
 void static randomSignalOut(const uint8_t *);
 void static sweepOut(const uint8_t *, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
 
@@ -116,6 +120,7 @@ void sweep_onRight(void);
 void sweep_onStart(void);
 void offLevel_onLeft(void);
 void offLevel_onRight(void);
+void syncOut_onStart(void);
 void calFreq_onLeft(void);
 void calFreq_onRight(void);
 void calFreq_onStart(void);
@@ -131,6 +136,7 @@ void pwm_updateDisplay(void);
 void pwmHs_updateDisplay(void);
 void sweep_updateDisplay(void);
 void offLevel_updateDisplay(void);
+void syncOut_updateDisplay(void);
 void calFreq_updateDisplay(void);
 
 // adjust LCDsendChar() function for strema
@@ -166,6 +172,7 @@ struct Config {
 	uint8_t  pwmDuty;
 	uint8_t  offLevel;	// output value when then generator if off
 	double   pulse;         // pulse duration, ms
+	uint8_t  syncOut;       // 0 - off, 1 - on
 };
 
 struct Config config = {
@@ -180,6 +187,7 @@ struct Config config = {
 	.pwmDuty   = 127,
 	.offLevel  = 0x80,        // middle of the scale
 	.pulse     = 1,
+	.syncOut   = 0,
 };
 
 volatile bool running; // generator on/off
@@ -364,6 +372,7 @@ const char SWEEP_TITLE[]     PROGMEM = "     Sweep      ";
 const char SWEEP_END_TITLE[] PROGMEM = "     Sweep   End";
 const char SWEEP_INC_TITLE[] PROGMEM = "     Sweep  Step";
 const char OFF_LEVEL_TITLE[] PROGMEM = "   Off Level    ";
+const char SYNC_OUT_TITLE[]  PROGMEM = "  Sync Output   ";
 const char CAL_FREQ_TITLE[]  PROGMEM = " Calibrate Freq ";
 
 const struct MenuEntry MENU[] PROGMEM = {
@@ -550,6 +559,19 @@ const struct MenuEntry OPT_MENU[] PROGMEM = {
 			offLevel_onLeft,
 			offLevel_onRight,
 			optMenu_onOpt,
+			optMenu_onOpt,
+		}
+	},
+	{
+		SYNC_OUT_TITLE,
+		NULL,
+		syncOut_updateDisplay,
+		{
+			optMenu_onUp,
+			optMenu_onDown,
+			buttonNop,
+			buttonNop,
+			syncOut_onStart,
 			optMenu_onOpt,
 		}
 	},
@@ -809,25 +831,34 @@ void signal_start(void) {
 	disableMenu();
 }
 
-uint32_t freqToAcc(double freq) {
-	double resolution = (double)CPU_FREQ / OUT_TICKS / ((uint32_t)1 << ACC_FRAC_BITS) / SIGNAL_BUFFER_SIZE;
+uint32_t freqToAcc(double freq, uint8_t ticks) {
+	double resolution = (double)CPU_FREQ / ticks / ((uint32_t)1 << ACC_FRAC_BITS) / SIGNAL_BUFFER_SIZE;
 	return freq/(resolution / config.freqCal);
 }
 
 void signal_continue(void) {
-	uint32_t acc = freqToAcc(config.freq);
+	uint32_t acc = freqToAcc(config.freq, (config.syncOut == 1) ? OUT_SYNC_TICKS : OUT_TICKS);
 	if(acc == 0) acc = 1;
 
 	SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
 
-	// sync impuls on ths HS-output
-	HSPORT |=  (1 << HS);
-	HSPORT &= ~(1 << HS);
+	if(config.syncOut == 1) {
+		signalWithSyncOut(signalBuffer,
+			(uint8_t)(acc >> 16),
+			(uint8_t)(acc >> 8),
+			(uint8_t)acc);
+	}
+	else {
+		// sync impuls on ths HS-output
+		HSPORT |=  (1 << HS);
+		HSPORT &= ~(1 << HS);
 
-	signalOut(signalBuffer,
-		(uint8_t)(acc >> 16),
-		(uint8_t)(acc >> 8),
-		(uint8_t)acc);
+		signalOut(signalBuffer,
+			(uint8_t)(acc >> 16),
+			(uint8_t)(acc >> 8),
+			(uint8_t)acc);
+	}
+
 	R2RPORT = config.offLevel;
 
 	// generation is interrupted - check buttons
@@ -1278,13 +1309,13 @@ void sweep_continue(void) {
 	double freq = config.freq - config.freqInc; // one step back for the first 1/4 of wave
 	if(freq < 0.0) freq = 0.0;
 
-	uint32_t acc = freqToAcc(config.freq);
+	uint32_t acc = freqToAcc(config.freq, OUT_TICKS);
 	if(acc == 0) acc = 1;
 
-	uint32_t inc = freqToAcc(config.freqInc);
+	uint32_t inc = freqToAcc(config.freqInc, OUT_TICKS);
 	if(inc == 0) inc = 1;
 
-	uint32_t end = freqToAcc(config.freqEnd);
+	uint32_t end = freqToAcc(config.freqEnd, OUT_TICKS);
 	if(end < acc) end = acc;
 
 	uint8_t startIndex = sizeof(signalBuffer) / 2; // here should be the maximum
@@ -1375,6 +1406,18 @@ void offLevel_onRight(void) {
 	offLevel_updateDisplay();
 }
 
+void syncOut_updateDisplay(void) {
+	CopyStringtoLCD(config.syncOut ? MNON : MNOFF, 13, 1);
+}
+
+void syncOut_onStart(void) {
+	switch(config.syncOut) {
+		case 0: config.syncOut = 1; break;
+		case 1: config.syncOut = 0; break;
+	}
+	syncOut_updateDisplay();
+}
+
 void calFreq_updateDisplay(void) {
 	LCDGotoXY(0, 1);
 	printf("%7.5f", config.freqCal);
@@ -1448,6 +1491,36 @@ void static signalOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t a
 		: [ad0] "r"(ad0), [ad1] "r"(ad1), [ad2] "r"(ad2), // phase increment
 		  [sig] "z"(signal),                              // signal source
 		  [out] "I"(_SFR_IO_ADDR(R2RPORT)),               // output port
+		  [sync] "I"(_SFR_IO_ADDR(SYNCPORT)),             // sync port
+		  [cond] "I"(_SFR_IO_ADDR(SPCR))                  // exit condition
+		: "r18", "r19" 
+	);
+}
+
+void static signalWithSyncOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t ad0)
+{
+	asm volatile(
+		"eor r18, r18 			; r18<-0"			"\n\t"
+		"eor r19, r19 			; r19<-0"			"\n\t"
+		"1:"								"\n\t"
+		"add r18, %[ad0]		; 1 cycle"			"\n\t"
+		"adc r19, %[ad1]		; 1 cycle"			"\n\t"	
+		"adc %A[sig], %[ad2]		; 1 cycle"			"\n\t"
+		"ld __tmp_reg__, Z 		; 2 cycles" 			"\n\t"
+		"out %[out], __tmp_reg__	; 1 cycle"			"\n\t"
+
+		"sbrc r30, 7			; 5 cycles together"		"\n\t"
+		"cbi %[sync], 5			; "				"\n\t"
+		"sbrs r30, 7			; "				"\n\t"
+		"sbi %[sync], 5			; "				"\n\t"
+
+		"sbis %[cond], 2		; 1 cycle if no skip" 		"\n\t"
+		"rjmp 1b			; 2 cycles. Total 15 cycles"	"\n\t"
+		:
+		: [ad0] "r"(ad0), [ad1] "r"(ad1), [ad2] "r"(ad2), // phase increment
+		  [sig] "z"(signal),                              // signal source
+		  [out] "I"(_SFR_IO_ADDR(R2RPORT)),               // output port
+		  [sync] "I"(_SFR_IO_ADDR(SYNCPORT)),             // sync port
 		  [cond] "I"(_SFR_IO_ADDR(SPCR))                  // exit condition
 		: "r18", "r19" 
 	);
@@ -1630,7 +1703,7 @@ void init(void) {
 	BDDR2  &= ~(_BV(BTN_INT));
 	BPORT2  =  (_BV(BTN_INT));
 
-	HSDDR |= _BV(HS); // configure HS as output
+	HSDDR |= _BV(HS) | _BV(SYNC); // configure HS as output
 	timer2Init();
 	enableMenu();
 	onNewMenuEntry();

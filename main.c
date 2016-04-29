@@ -36,10 +36,10 @@
 #define START   2
 #define RIGHT   3
 #define UP      4
+#define OPT     6
 #define BPORT2  PORTB
-#define BPIN2   PINB
 #define BDDR2   DDRB
-#define OPT     2
+#define BTN_INT 2
 
 // define Highs Speed (HS) signal output (PD5)
 #define HSDDR   DDRD
@@ -50,13 +50,20 @@
 #define EE_CONFIG      0
 #define EE_INIT        E2END
 
-#define RESOLUTION (16000000.0/9/65536/256)  // (16000000 Hz system clock)/(9 clocks per iteration)
-                                             // /(2 bytes in fraction part => 65536 units)/(256 points per period)
-#define FREQ_CAL      0.9999     // some calibration coeficient FIXME should be run-time configurable
+#define CPU_FREQ           16000000ul
+#define OUT_TICKS          9
+#define ACC_FRAC_BITS      16
+#define SIGNAL_BUFFER_SIZE 256
+
 #define MIN_FREQ      0.0        // minimum DDS frequency
-#define MAX_FREQ      999999.999 // maximum DDS frequency
-#define MIN_FREQ_STEP 0.001      // minimum DDS frequency step
+#define MAX_FREQ      999999.9   // maximum DDS frequency
+#define MIN_FREQ_STEP 0.1        // minimum DDS frequency step
 #define MAX_FREQ_STEP 10000.0    // maximum DDS frequency step
+#define MIN_FREQ_INC  0.0        // minimum sweep frequency increment
+#define MAX_FREQ_INC  100.0      // maximum sweep frequency increment
+#define MIN_FREQ_CAL  0.09
+#define MAX_FREQ_CAL  1.01
+#define STEP_FREQ_CAL 0.00001
 
 void timer2Init(void);
 void timer2Start(void);
@@ -64,9 +71,9 @@ void timer2Stop(void);
 void timer1Start(uint8_t);
 void timer1StartPwm(uint16_t);
 void timer1Stop(void);
-void static inline signalOut(const uint8_t *, uint8_t, uint8_t, uint8_t);
-void static inline randomSignalOut(const uint8_t *);
-void static inline sweepOut(const uint8_t *, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
+void static signalOut(const uint8_t *, uint8_t, uint8_t, uint8_t);
+void static randomSignalOut(const uint8_t *);
+void static sweepOut(const uint8_t *, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
 
 // button processing
 typedef void (ButtonHandlerFn_t)(void);
@@ -97,9 +104,16 @@ void pwmHs_onDown(void);
 void pwmHs_onLeft(void);
 void pwmHs_onRight(void);
 void pwmHs_onStart(void);
+void sweep_onUp(void);
+void sweep_onDown(void);
+void sweep_onLeft(void);
+void sweep_onRight(void);
 void sweep_onStart(void);
 void offLevel_onLeft(void);
 void offLevel_onRight(void);
+void calFreq_onLeft(void);
+void calFreq_onRight(void);
+void calFreq_onStart(void);
 
 // menu processing
 typedef void (MenuItemEnterHandlerFn_t)(void);
@@ -109,7 +123,9 @@ void freqStep_updateDisplay(void);
 void hs_updateDisplay(void);
 void pwm_updateDisplay(void);
 void pwmHs_updateDisplay(void);
+void sweep_updateDisplay(void);
 void offLevel_updateDisplay(void);
+void calFreq_updateDisplay(void);
 
 // adjust LCDsendChar() function for strema
 static int LCDsendstream(char c, FILE *stream);
@@ -135,6 +151,9 @@ struct MenuEntry {
 struct Config {
 	uint8_t  menuEntry;	// active or last active main menu entry
 	double   freq;		// frequency value
+	double   freqCal;	// frequence calibration coefficient
+	double   freqEnd;	// end frequency for sweep
+	double   freqInc;	// frequency increment for sweep
 	uint8_t  hsFreq;	// high speed frequency [1..8Mhz]
 	double   freqStep;	// frequency step value
 	uint16_t pwmFreq;	// PWM freq [61..62500Hz]
@@ -142,7 +161,19 @@ struct Config {
 	uint8_t  offLevel;	// output value when then generator if off
 };
 
-struct Config config;
+struct Config config = {
+	.menuEntry = 0,
+	.freq      = 1000.0,
+	.freqCal   = 1.0000,
+	.freqEnd   = 20000.0,
+	.freqInc   = 0.1,
+	.hsFreq    = 1,           // default 1MHz HS signal freq
+	.freqStep  = 100.0,
+	.pwmFreq   = 62500,
+	.pwmDuty   = 127,
+	.offLevel  = 0x80,        // middle of the scale
+};
+
 volatile bool running; // generator on/off
 
 //define signals
@@ -321,7 +352,10 @@ const char HS_TITLE[]        PROGMEM = "   High Speed   ";
 const char PWM_TITLE[]       PROGMEM = "      PWM       ";
 const char PWM_HS_TITLE[]    PROGMEM = " PWM (HS)       ";
 const char SWEEP_TITLE[]     PROGMEM = "     Sweep      ";
+const char SWEEP_END_TITLE[] PROGMEM = "     Sweep   End";
+const char SWEEP_INC_TITLE[] PROGMEM = "     Sweep  Step";
 const char OFF_LEVEL_TITLE[] PROGMEM = "   Off Level    ";
+const char CAL_FREQ_TITLE[]  PROGMEM = " Calibrate Freq ";
 
 const struct MenuEntry MENU[] PROGMEM = {
 	{
@@ -457,12 +491,12 @@ const struct MenuEntry MENU[] PROGMEM = {
 	{
 		SWEEP_TITLE,
 		NULL,
-		signal_updateDisplay,
+		sweep_updateDisplay,
 		{
-			menu_onUp,
-			menu_onDown,
-			signal_onLeft,
-			signal_onRight,
+			sweep_onUp,
+			sweep_onDown,
+			sweep_onLeft,
+			sweep_onRight,
 			sweep_onStart,
 			menu_onOpt,
 		}
@@ -494,6 +528,19 @@ const struct MenuEntry OPT_MENU[] PROGMEM = {
 			offLevel_onLeft,
 			offLevel_onRight,
 			optMenu_onOpt,
+			optMenu_onOpt,
+		}
+	},
+	{
+		CAL_FREQ_TITLE,
+		NULL,
+		calFreq_updateDisplay,
+		{
+			optMenu_onUp,
+			optMenu_onDown,
+			calFreq_onLeft,
+			calFreq_onRight,
+			calFreq_onStart,
 			optMenu_onOpt,
 		}
 	},
@@ -532,9 +579,10 @@ static const uint16_t BUTTON_TIME_WRAP   = 32768;
 uint8_t optMenuEntryNum = (uint8_t)-1;   // active opt-menu entry or -1 if not in the opt-menu
 struct MenuEntry menuEntry;              // copy of active menu entry
 struct ButtonHandlers * buttonHandlers;
+uint8_t submenuLevel = 0;                // used by the seep only
 
-uint8_t signalBuffer[256]
-	__attribute__ ((aligned(256)))
+uint8_t signalBuffer[SIGNAL_BUFFER_SIZE]
+	__attribute__ ((aligned(SIGNAL_BUFFER_SIZE)))
 	__attribute__ ((section (".noinit")));
 
 // adjust LCD stream fuinction to use with printf()
@@ -592,7 +640,7 @@ void checkButtons(void) {
 		newButton = Button_Left;
 	else if(bit_is_clear(BPIN, START))
 		newButton = Button_Start;
-	else if(bit_is_clear(BPIN2, OPT)) // must be checked as last one
+	else if(bit_is_clear(BPIN, OPT))
 		newButton = Button_Opt;
 	else
 		newButton = Button_None;
@@ -623,23 +671,11 @@ void saveSettings(void) {
 	eeprom_update_block(&config, EE_CONFIG, sizeof(config));
 }
 
-void initSettings(void) {
-	config.menuEntry = 0;
-	config.freq      = 1000.0;
-	config.freqStep  = 100.0;
-	config.hsFreq    = 1;    // default 1MHz HS signal freq
-	config.pwmFreq   = 62500;
-	config.pwmDuty   = 127;
-	config.offLevel  = 0x80; // middle of the scale
-	
-	saveSettings();
-	eeprom_write_byte((uint8_t*)EE_INIT, 'T');   // marks once that eeprom init is done
-	//once this procedure is held, no more initialization is performed
-}
-
 void loadSettings(void) {
 	if(eeprom_read_byte((uint8_t*)EE_INIT) != 'T') {
-		initSettings();
+		// save the initial hard-coded values
+		saveSettings();
+		eeprom_write_byte((uint8_t*)EE_INIT, 'T');   // marks once that eeprom init is done
 	}
 
 	eeprom_read_block(&config, EE_CONFIG, sizeof(config));
@@ -712,7 +748,7 @@ void optMenu_onOpt(void) {
 
 void signal_updateDisplay(void) {
 	LCDGotoXY(0, 1);
-	printf("%10.3fHz", config.freq);
+	printf("%8.1fHz", config.freq);
 	CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
 }
 
@@ -751,9 +787,20 @@ void signal_start(void) {
 	disableMenu();
 }
 
+uint32_t freqToAcc(double freq) {
+	double resolution = (double)CPU_FREQ / OUT_TICKS / ((uint32_t)1 << ACC_FRAC_BITS) / SIGNAL_BUFFER_SIZE;
+	return freq/(resolution / config.freqCal);
+}
+
 void signal_continue(void) {
-	uint32_t acc = config.freq/(RESOLUTION*FREQ_CAL); // calculate accumulator value
+	uint32_t acc = freqToAcc(config.freq);
+	if(acc == 0) acc = 1;
+
 	SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
+
+	// sync impuls on ths HS-output
+	HSPORT |=  (1 << HS);
+	HSPORT &= ~(1 << HS);
 
 	signalOut(signalBuffer,
 		(uint8_t)(acc >> 16),
@@ -761,7 +808,7 @@ void signal_continue(void) {
 		(uint8_t)acc);
 	R2RPORT = config.offLevel;
 
-	// generation is interrupted, but not stopped - check buttons and continue
+	// generation is interrupted - check buttons
 	enableMenu();
 	while(buttonState.pressed != Button_None) {
 		processButton();
@@ -770,8 +817,8 @@ void signal_continue(void) {
 }
 
 void signal_run(void) {
+	memcpy_P(signalBuffer, (const uint8_t *)menuEntry.data, sizeof(signalBuffer));
 	while(running) {
-		memcpy_P(signalBuffer, (const uint8_t *)menuEntry.data, sizeof(signalBuffer));
 		signal_continue();
 	}
 }
@@ -813,7 +860,7 @@ void noise_onStart(void) {
 
 void freqStep_updateDisplay(void) {
 	LCDGotoXY(0, 1);
-	printf("%10.3fHz", config.freqStep);
+	printf("%8.1fHz", config.freqStep);
 }
 
 void freqStep_onLeft(void) {
@@ -859,8 +906,6 @@ void hs_onRight(void) {
 void hs_onStart(void) {
 	if(running) {
 		running = false;
-		timer1Stop();
-		HSPORT &= ~(1<<HS);   // set HS pin to LOW FIXME sometimes it stays in HIGH
 	}
 	else {
 		saveSettings();
@@ -872,6 +917,8 @@ void hs_onStart(void) {
 			processButton();
 		}
 
+		timer1Stop();
+		HSPORT &= ~(1 << HS);   // set HS pin to LOW
 		menuEntry.updateDisplay();
 	}
 }
@@ -946,8 +993,6 @@ void pwmHs_updateDisplay(void) {
 void pwmHs_onStart(void) {
 	if(running) {
 		running = false;
-		timer1Stop();
-		HSPORT &= ~(1 << HS);   // set HS pin to LOW
 	}
 	else {
 		saveSettings();
@@ -960,6 +1005,8 @@ void pwmHs_onStart(void) {
 			processButton();
 		}
 
+		timer1Stop();
+		HSPORT &= ~(1 << HS);   // set HS pin to LOW
 		menuEntry.updateDisplay();
 	}
 }
@@ -1008,27 +1055,168 @@ void pwmHs_onRight(void) {
 	pwmHs_updateDisplay();
 }
 
-void sweep_onStart(void) {
-	saveSettings();
-	running = true;
-	menuEntry.updateDisplay();
-	disableMenu();
+void sweep_updateDisplay(void) {
+	switch(submenuLevel) {
+		case 0:
+			CopyStringtoLCD(SWEEP_TITLE, 0, 0);
+			LCDGotoXY(0, 1);
+			printf("%8.1fHz", config.freq);
+			break;
 
-	uint32_t acc = config.freq/RESOLUTION; // calculate accumulator value
+		case 1:
+			CopyStringtoLCD(SWEEP_END_TITLE, 0, 0);
+			LCDGotoXY(0, 1);
+			printf("%8.1fHz", config.freqEnd);
+			break;
+
+		case 2:
+			CopyStringtoLCD(SWEEP_INC_TITLE, 0, 0);
+			LCDGotoXY(0, 1);
+			printf("%8.1fHz", config.freqInc);
+			break;
+
+	}
+	CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
+}
+
+void sweep_onUp(void) {
+	submenuLevel = 0;
+	menu_onUp();
+}
+
+void sweep_onDown(void) {
+	submenuLevel = 0;
+	menu_onDown();
+}
+
+void sweep_onLeft(void) {
+	switch(submenuLevel) {
+		case 0:
+			config.freq -= config.freqStep;
+			if(config.freq < MIN_FREQ)
+				config.freq = MIN_FREQ;
+			break;
+
+		case 1:
+			config.freqEnd -= config.freqStep;
+			if(config.freqEnd < config.freq)
+				config.freqEnd = config.freq;
+			break;
+
+		case 2:
+			config.freqInc -= config.freqStep;
+			if(config.freqInc < MIN_FREQ_INC)
+				config.freqInc = MIN_FREQ_INC;
+			break;
+	}
+	sweep_updateDisplay();
+}
+
+void sweep_onRight(void) {
+	switch(submenuLevel) {
+		case 0:
+			config.freq += config.freqStep;
+			if(config.freq > MAX_FREQ)
+				config.freq = MAX_FREQ;
+			break;
+
+		case 1:
+			config.freqEnd += config.freqStep;
+			if(config.freqEnd > MAX_FREQ)
+				config.freq = MAX_FREQ;
+			break;
+
+		case 2:
+			config.freqInc += config.freqStep;
+			if(config.freqInc > MAX_FREQ_INC)
+				config.freqInc = MAX_FREQ_INC;
+			break;
+	}
+	sweep_updateDisplay();
+}
+
+void sweep_continue(void) {
+	double freq = config.freq - config.freqInc; // one step back for the first 1/4 of wave
+	if(freq < 0.0) freq = 0.0;
+
+	uint32_t acc = freqToAcc(config.freq);
+	if(acc == 0) acc = 1;
+
+	uint32_t inc = freqToAcc(config.freqInc);
+	if(inc == 0) inc = 1;
+
+	uint32_t end = freqToAcc(config.freqEnd);
+	if(end < acc) end = acc;
+
+	uint8_t startIndex = sizeof(signalBuffer) / 2; // here should be the maximum
+	while((startIndex < sizeof(signalBuffer)-1) && (signalBuffer[startIndex] > config.offLevel)) ++startIndex;
+
 	SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
 
-	memcpy_P(signalBuffer, SINE_WAVE_FROM_ZERO, sizeof(signalBuffer));
+	// sync impuls on ths HS-output
+	HSPORT |=  (1 << HS);
+	HSPORT &= ~(1 << HS);
+
 	sweepOut(signalBuffer,
+		startIndex,
 		(uint8_t)(acc >> 16),
 		(uint8_t)(acc >> 8),
 		(uint8_t)acc,
-		0,
-		0,
-		1);
+		(uint8_t)(inc >> 16),
+		(uint8_t)(inc >> 8),
+		(uint8_t)inc,
+		(uint8_t)(end >> 16),
+		(uint8_t)(end >> 8),
+		(uint8_t)end);
+	R2RPORT = config.offLevel;
 
-	// output only once
-	running = false;
-	signal_stop();
+	// generation is interrupted - check buttons
+	enableMenu();
+	while(buttonState.pressed != Button_None) {
+		processButton();
+	}
+	disableMenu();
+}
+
+void sweep_onStart(void) {
+	if(!running) {
+		switch(submenuLevel) {
+			case 0: { // set end frequency
+					submenuLevel = 1;
+					sweep_updateDisplay();
+				}
+				break;
+
+			case 1: { // set step
+					submenuLevel = 2;
+					sweep_updateDisplay();
+				}
+				break;
+
+			case 2: { // run
+					saveSettings();
+					running = true;
+					menuEntry.updateDisplay();
+					disableMenu();
+
+					memcpy_P(signalBuffer, SINE_WAVE_FROM_ZERO, sizeof(signalBuffer));
+
+					while(running) {
+						sweep_continue();
+					}
+
+					signal_stop();
+
+					// reset menu
+					submenuLevel = 0;
+					onNewMenuEntry();
+				}
+				break;
+		}
+	}
+	else {
+		running = false;
+	}
 }
 
 void offLevel_updateDisplay(void) {
@@ -1048,6 +1236,48 @@ void offLevel_onRight(void) {
 	offLevel_updateDisplay();
 }
 
+void calFreq_updateDisplay(void) {
+	LCDGotoXY(0, 1);
+	printf("%7.5f", config.freqCal);
+	CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
+}
+
+void calFreq_onStart(void) {
+	if(!running) {
+		running = true;
+		calFreq_updateDisplay();
+		disableMenu();
+
+		memcpy_P(signalBuffer, SINE_WAVE_FROM_ZERO, sizeof(signalBuffer));
+		while(running) {
+			signal_continue();
+		}
+
+		enableMenu();
+		running = false;
+		R2RPORT = config.offLevel;
+		calFreq_updateDisplay();
+		while(buttonState.pressed != Button_None); // wait until button release, otherwise the generation will be started again
+	}
+	else {
+		running = false;
+	}
+}
+
+void calFreq_onLeft(void) {
+	config.freqCal -= STEP_FREQ_CAL;
+	if(config.freqCal < MIN_FREQ_CAL)
+		config.freqCal = MIN_FREQ_CAL;
+        calFreq_updateDisplay();
+}
+
+void calFreq_onRight(void) {
+	config.freqCal += STEP_FREQ_CAL;
+	if(config.freqCal > MAX_FREQ_CAL)
+		config.freqCal = MAX_FREQ_CAL;
+        calFreq_updateDisplay();
+}
+
 //timer overflow interrupt service tourine
 //checks all button status and if button is pressed
 //value is updated
@@ -1062,7 +1292,7 @@ http://www.myplace.nu/avr/minidds/index.htm
 small modification is made - added additional command which
 checks if CPHA bit is set in SPCR register if yes - exit function
 */
-void static inline signalOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t ad0)
+void static signalOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t ad0)
 {
 	asm volatile(
 		"eor r18, r18 			; r18<-0"			"\n\t"
@@ -1084,7 +1314,7 @@ void static inline signalOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, ui
 	);
 }
 
-void static inline randomSignalOut(const uint8_t *signal)
+void static randomSignalOut(const uint8_t *signal)
 {
 	asm volatile(
 		"1:"								"\n\t"
@@ -1100,44 +1330,108 @@ void static inline randomSignalOut(const uint8_t *signal)
 	);
 }
 
-void static inline sweepOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t ad0,
-                             uint8_t ad2i, uint8_t ad1i, uint8_t ad0i)
+void static sweepOut(const uint8_t *signal, uint8_t startIndex,
+                     uint8_t a2, uint8_t a1, uint8_t a0,
+                     uint8_t i2, uint8_t i1, uint8_t i0,
+                     uint8_t e2, uint8_t e1, uint8_t e0)
 {
 	asm volatile(
-		"eor r18, r18 			; r18<-0"			"\n\t"
-		"eor r19, r19 			; r19<-0"			"\n\t"
-		"ldi r16, 11            	; "				"\n\t" // stop frequency
-		"ldi r17, 0             	; "				"\n\t"
+		"eor r18, r18 			; "				"\n\t" // r18 = 0
+		"eor r19, r19 			; "				"\n\t" // r19 = 0
+		//"ldi %A[sig], 194		; "				"\n\t" // r30 = 3/4 of buffer size
+
 		"1:"								"\n\t"
-		"add r18, %[ad0]		; 1 cycle"			"\n\t"
-		"adc r19, %[ad1]		; 1 cycle"			"\n\t"	
-		"adc %A[sig], %[ad2]		; 1 cycle"			"\n\t"
-		"breq 2f			; 1 cycle if no jump" 		"\n\t"
-		"ld __tmp_reg__, Z		; 2 cycles" 			"\n\t"
-		"out %[out], __tmp_reg__	; 1 cycle"			"\n\t"
-		"rjmp 1b			; 2 cycles. Total 9 cycles"	"\n\t"
+		"add r18, %[a0]			; 1 c"				"\n\t"
+		"adc r19, %[a1]			; 1 c"				"\n\t"	
+		"adc %A[sig], %[a2]		; 1 c"				"\n\t"
+		"breq 2f			; 1/2 c" 			"\n\t" // check begin of new period
+		"ld __tmp_reg__, Z		; 2 c" 				"\n\t" // load from the buffer
+		"out %[out], __tmp_reg__	; 1 c"				"\n\t" // output
+		"rjmp 1b			; 2 c. Total 9 cycles"		"\n\t"
+
+		// 5 cycles from iteration begin
+
+		// make the skipped work
 		"2:                     	; "				"\n\t"
-		"add %[ad0], %[ad0i]		; "				"\n\t"
-		"adc %[ad1], %[ad1i]		; "				"\n\t"
-		"adc %[ad2], %[ad2i]		; "				"\n\t"
-		"cp %[ad2], r17			; "				"\n\t" // avoid frequency inc on next step at begin
-		"brne 3f			; "				"\n\t"
-		"inc %A[sig]			; "				"\n\t"
+		"ld __tmp_reg__, Z		; 2 c" 				"\n\t" // load from the buffer
+		"out %[out], __tmp_reg__	; 1 c"				"\n\t" // output
+
+		// increment the increment
+		"add %[a0], %[i0]		; 1 c"				"\n\t"
+		"adc %[a1], %[i1]		; 1 c"				"\n\t"
+		"adc %[a2], %[i2]		; 1 c"				"\n\t"
+
+		// end reached? any continue branch takes 10 cycles
+		"cp %[e2], %[a2]		; 1 c"				"\n\t"
+		"brlo 9f			; 1/2 c"			"\n\t" // a2 > e2 : exit
+		"brne 3f			; 1/2 c"			"\n\t" // a2 == e2 : check e1/a1
+		"cp %[e1], %[a1]		; 1 c"				"\n\t"
+		"brlo 9f			; 1/2 c"			"\n\t" // a1 > e1 : exit
+		"brne 4f			; 1/2 c"			"\n\t" // a1 == e1 : check e0/a0
+		"cp %[e0], %[a0]		; 1 c"				"\n\t"
+		"brlo 9f			; 1/2 c"			"\n\t" // a0 > e0 : exit
+		"rjmp 5f			; 2 c"				"\n\t"
 		"3:             	        ; "				"\n\t"
-		"cp %[ad2], r16			; "				"\n\t"
-		"sbis %[cond], 2		; "		 		"\n\t"
-		"brne 1b			; "				"\n\t"
+		"nop             	        ; "				"\n\t"
+		"nop             	        ; "				"\n\t"
+		"nop             	        ; "				"\n\t"
+		"4:             	        ; "				"\n\t"
+		"nop             	        ; "				"\n\t"
+		"nop             	        ; "				"\n\t"
+		"nop             	        ; "				"\n\t"
+
+		// 21 cycles from iteration begin and 8 cycles will be taken at the end =>
+		// add the 5 skipped steps to the acc (1 step to every 6 cycles)
+		"add r18, %[a0]			; 1 c"				"\n\t"
+		"adc r19, %[a1]			; 1 c"				"\n\t"	
+		"adc %A[sig], %[a2]		; 1 c"				"\n\t"
+		"add r18, %[a0]			; 1 c"				"\n\t"
+		"adc r19, %[a1]			; 1 c"				"\n\t"	
+		"adc %A[sig], %[a2]		; 1 c"				"\n\t"
+		"add r18, %[a0]			; 1 c"				"\n\t"
+		"adc r19, %[a1]			; 1 c"				"\n\t"	
+		"adc %A[sig], %[a2]		; 1 c"				"\n\t"
+		"add r18, %[a0]			; 1 c"				"\n\t"
+		"adc r19, %[a1]			; 1 c"				"\n\t"	
+		"adc %A[sig], %[a2]		; 1 c"				"\n\t"
+		"add r18, %[a0]			; 1 c"				"\n\t"
+		"adc r19, %[a1]			; 1 c"				"\n\t"	
+		"adc %A[sig], %[a2]		; 1 c"				"\n\t"
+		"nop             	        ; "				"\n\t"
+
+		// avoid frequency inc on next step at begin; loop here until %A[sig] is incremented; each iteration must be 9 cycles
+		"5:             	        ; "				"\n\t"
+		"brne 6f			; 1/2 c"			"\n\t" // break if %A[sig] != 0
+		"add r18, %[a0]			; 1 c"				"\n\t"
+		"adc r19, %[a1]			; 1 c"				"\n\t"	
+		"adc %A[sig], %[a2]		; 1 c"				"\n\t"
+		"nop             	        ; "				"\n\t"
+		"nop             	        ; "				"\n\t"
+		"nop             	        ; "				"\n\t"
+		"rjmp 5b			; 2 c"				"\n\t"
+
+		// output the new value
+		"ld __tmp_reg__, Z		; 2 c" 				"\n\t" // load from the buffer
+		"out %[out], __tmp_reg__	; 1 c"				"\n\t" // output
+
+		// check exit condition
+		"6:             	        ; "				"\n\t"
+		"sbis %[cond], 2		; 1 c"		 		"\n\t"
+		"rjmp 1b			; 2 c"				"\n\t"
+
+		// exit
+		"9:             	        ; "				"\n\t"
 		:
-		: [ad0] "r"(ad0), [ad1] "r"(ad1), [ad2] "r"(ad2),      // phase increment
-		  [sig] "z"(signal),                                   // signal source
+		: [a0] "r"(a0), [a1] "r"(a1), [a2] "r"(a2),            // phase increment
+		  [sig] "z"(signal + startIndex),                      // signal source
 		  [out] "I"(_SFR_IO_ADDR(R2RPORT)),                    // output port
 		  [cond] "I"(_SFR_IO_ADDR(SPCR)),                      // exit condition
-		  [ad0i] "r"(ad0i), [ad1i] "r"(ad1i), [ad2i] "r"(ad2i) // increment of the increment
-		: "r16", "r17", "r18", "r19"
+		  [i0] "r"(i0), [i1] "r"(i1), [i2] "r"(i2),            // increment of the increment
+		  [e0] "r"(e0), [e1] "r"(e1), [e2] "r"(e2)             // stop value
+		: "r18", "r19"
 	);
 }
 
-// FIXME no HS-signal
 void timer1Start(uint8_t freqMHz)
 {
 	switch(freqMHz) {
@@ -1146,8 +1440,8 @@ void timer1Start(uint8_t freqMHz)
 		case 8:  OCR1A = 0; break;
 		default: OCR1A = 7; // 1 MHz
 	}
-	TCCR1A = 0x40;       // output compare toggles OC1A pin
-	TCCR1B = 0b00001001; // start timer without prescaler
+	TCCR1A = (1 << COM1A0); // output compare toggles OC1A pin
+	TCCR1B = 0b00001001;    // start timer without prescaler
 }
 
 void timer1StartPwm(uint16_t freqHz)
@@ -1168,7 +1462,8 @@ void timer1StartPwm(uint16_t freqHz)
 
 void timer1Stop(void)
 {
-	TCCR1B = 0x00; // timer off
+	TCCR1A = 0; // release the OC1A pin
+	TCCR1B = 0; // timer off
 }
 
 void init(void) {
@@ -1188,11 +1483,13 @@ void init(void) {
 	R2RPORT = config.offLevel;
 	R2RDDR  = 0xFF; // set A port as output
 
-	// set ports pins for buttons
-	BDDR   &= ~(_BV(START) | _BV(UP) | _BV(DOWN) | _BV(RIGHT) | _BV(LEFT));
-	BPORT  |=  (_BV(START) | _BV(UP) | _BV(DOWN) | _BV(RIGHT) | _BV(LEFT));
-	BDDR2  &= ~(_BV(OPT));
-	BPORT2  =  (_BV(OPT));
+	// set port pins for buttons
+	BDDR   &= ~(_BV(START) | _BV(UP) | _BV(DOWN) | _BV(RIGHT) | _BV(LEFT) | _BV(OPT));
+	BPORT  |=  (_BV(START) | _BV(UP) | _BV(DOWN) | _BV(RIGHT) | _BV(LEFT) | _BV(OPT));
+
+	// set port pins for the button interupt
+	BDDR2  &= ~(_BV(BTN_INT));
+	BPORT2  =  (_BV(BTN_INT));
 
 	HSDDR |= _BV(HS); // configure HS as output
 	timer2Init();

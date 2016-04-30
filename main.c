@@ -42,11 +42,10 @@
 #define BTN_INT 2
 
 // define Highs Speed (HS) signal output (PD5)
-#define HSDDR         DDRD
-#define HSPORT        PORTD
-#define HS            5
-#define SYNCPORT      PORTD
-#define SYNC          7
+#define HSDDR   DDRD
+#define HSPORT  PORTD
+#define HSPIN   PIND
+#define HS      5
 
 // define eeprom addresses
 #define EE_CONFIG     0
@@ -76,10 +75,10 @@ void timer2Stop(void);
 void timer1Start(uint8_t);
 void timer1StartPwm(uint16_t);
 void timer1Stop(void);
-void static signalOut(const uint8_t *, uint8_t, uint8_t, uint8_t);
-void static signalWithSyncOut(const uint8_t *, uint8_t, uint8_t, uint8_t);
-void static randomSignalOut(const uint8_t *);
-void static sweepOut(const uint8_t *, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
+inline void static signalOut(const uint8_t *, uint8_t, uint8_t, uint8_t);
+inline void static signalWithSyncOut(const uint8_t *, uint8_t, uint8_t, uint8_t);
+inline void static randomSignalOut(const uint8_t *);
+inline void static sweepOut(const uint8_t *, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
 
 // button processing
 typedef void (ButtonHandlerFn_t)(void);
@@ -120,7 +119,11 @@ void sweep_onRight(void);
 void sweep_onStart(void);
 void offLevel_onLeft(void);
 void offLevel_onRight(void);
-void syncOut_onStart(void);
+void syncOut_onLeft(void);
+void syncOut_onRight(void);
+void syncOut_onOpt(void);
+void trigger_onLeft(void);
+void trigger_onRight(void);
 void calFreq_onLeft(void);
 void calFreq_onRight(void);
 void calFreq_onStart(void);
@@ -137,6 +140,7 @@ void pwmHs_updateDisplay(void);
 void sweep_updateDisplay(void);
 void offLevel_updateDisplay(void);
 void syncOut_updateDisplay(void);
+void trigger_updateDisplay(void);
 void calFreq_updateDisplay(void);
 
 // adjust LCDsendChar() function for strema
@@ -160,6 +164,14 @@ struct MenuEntry {
 	struct ButtonHandlers buttonHandlers;
 };
 
+enum SyncOut {
+	SyncOut_Off,
+	SyncOut_Single,
+	SyncOut_Multiple,
+	SyncOut_Trigger,
+	SyncOut_End
+};
+
 struct Config {
 	uint8_t  menuEntry;	// active or last active main menu entry
 	double   freq;		// frequency value, Hz
@@ -172,22 +184,24 @@ struct Config {
 	uint8_t  pwmDuty;
 	uint8_t  offLevel;	// output value when then generator if off
 	double   pulse;         // pulse duration, ms
-	uint8_t  syncOut;       // 0 - off, 1 - on
+	enum SyncOut syncOut;
+	double   triggerDelay;  // deleay after trigger detection, ms
 };
 
 struct Config config = {
-	.menuEntry = 0,
-	.freq      = 1000.0,
-	.freqCal   = 1.0000,
-	.freqEnd   = 20000.0,
-	.freqInc   = 0.1,
-	.hsFreq    = 1,           // default 1MHz HS signal freq
-	.freqStep  = 100.0,
-	.pwmFreq   = 62500,
-	.pwmDuty   = 127,
-	.offLevel  = 0x80,        // middle of the scale
-	.pulse     = 1,
-	.syncOut   = 0,
+	.menuEntry    = 0,
+	.freq         = 1000.0,
+	.freqCal      = 1.0000,
+	.freqEnd      = 20000.0,
+	.freqInc      = 0.1,
+	.hsFreq       = 1,           // default 1MHz HS signal freq
+	.freqStep     = 100.0,
+	.pwmFreq      = 62500,
+	.pwmDuty      = 127,
+	.offLevel     = 0x80,        // middle of the scale
+	.pulse        = 1.0,
+	.syncOut      = SyncOut_Off,
+	.triggerDelay = 0.0,
 };
 
 volatile bool running; // generator on/off
@@ -373,6 +387,7 @@ const char SWEEP_END_TITLE[] PROGMEM = "     Sweep   End";
 const char SWEEP_INC_TITLE[] PROGMEM = "     Sweep  Step";
 const char OFF_LEVEL_TITLE[] PROGMEM = "   Off Level    ";
 const char SYNC_OUT_TITLE[]  PROGMEM = "  Sync Output   ";
+const char TRIGGER_TITLE[]   PROGMEM = " Trigger Delay  ";
 const char CAL_FREQ_TITLE[]  PROGMEM = " Calibrate Freq ";
 
 const struct MenuEntry MENU[] PROGMEM = {
@@ -569,9 +584,22 @@ const struct MenuEntry OPT_MENU[] PROGMEM = {
 		{
 			optMenu_onUp,
 			optMenu_onDown,
-			buttonNop,
-			buttonNop,
-			syncOut_onStart,
+			syncOut_onLeft,
+			syncOut_onRight,
+			syncOut_onOpt,
+			syncOut_onOpt,
+		}
+	},
+	{
+		TRIGGER_TITLE,
+		NULL,
+		trigger_updateDisplay,
+		{
+			optMenu_onUp,
+			optMenu_onDown,
+			trigger_onLeft,
+			trigger_onRight,
+			optMenu_onOpt,
 			optMenu_onOpt,
 		}
 	},
@@ -592,9 +620,11 @@ const struct MenuEntry OPT_MENU[] PROGMEM = {
 static const uint8_t OPT_MENU_SIZE = (sizeof(OPT_MENU)/sizeof(OPT_MENU[0]));
 
 //various LCD strings
-const char MNON[]  PROGMEM = "ON ";
-const char MNOFF[] PROGMEM = "OFF";
-const char RND[]   PROGMEM = "    Random";
+const char MNON[]   PROGMEM = "ON ";
+const char MNOFF[]  PROGMEM = "OFF";
+const char MNDIS[]  PROGMEM = "DIS";
+const char MNTRIG[] PROGMEM = "TRG";
+const char RND[]    PROGMEM = "    Random";
 
 enum Button {
 	Button_None,
@@ -635,9 +665,25 @@ static int LCDsendstream(char c , FILE *stream) {
 	return 0;
 }
 
-inline const void * pgm_read_ptr(const void * addr)
-{
-	return (const void *)pgm_read_word(addr);
+inline uint32_t delayMsToCount(double ms) {
+	return (double)(CPU_FREQ / 1000) * ms / 6;
+}
+
+inline void delayCount(uint32_t count) {
+	asm volatile(
+		// takes 6 cycles
+		"1:" "\n\t"
+		"subi %[c0], 1		; 1 c" 		"\n\t"
+		"sbci %[c1], 0 		; 1 c" 		"\n\t"
+		"sbci %[c2], 0 		; 1 c" 		"\n\t"
+		"sbci %[c3], 0 		; 1 c" 		"\n\t"
+		"brne 1b 		; 2 c" 		"\n\t"
+		:
+		: [c3] "d"((uint8_t)(count >> 24)),
+		  [c2] "d"((uint8_t)(count >> 16)),
+		  [c1] "d"((uint8_t)(count >> 8)),
+		  [c0] "d"((uint8_t)count)
+	);
 }
 
 // initialize Timer2 (used for button reading)
@@ -725,6 +771,21 @@ void loadSettings(void) {
 	eeprom_read_block(&config, EE_CONFIG, sizeof(config));
 }
 
+inline bool isHsOutputEnabled(void)
+{
+	return (config.syncOut != SyncOut_Trigger);
+}
+
+inline void setHsDirection(void)
+{
+	if(isHsOutputEnabled()) {
+		HSDDR |=  _BV(HS); // configure HS as output
+	}
+	else {
+		HSDDR &= ~_BV(HS); // configure HS as input
+	}
+}
+
 inline void syncPulse(void)
 {
 	HSPORT |=  (1 << HS);
@@ -796,10 +857,17 @@ void optMenu_onOpt(void) {
 	onNewMenuEntry();
 }
 
+void displaySignalStatus(void) {
+	if(running)
+		CopyStringtoLCD((config.syncOut == SyncOut_Trigger) ? MNTRIG : MNON, 13, 1);
+	else
+		CopyStringtoLCD(MNOFF, 13, 1);
+}
+
 void signal_updateDisplay(void) {
 	LCDGotoXY(0, 1);
 	printf("%8.1fHz", config.freq);
-	CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
+	displaySignalStatus();
 }
 
 void signal_onLeft(void) {
@@ -842,34 +910,69 @@ uint32_t freqToAcc(double freq, uint8_t ticks) {
 	return freq/(resolution / config.freqCal);
 }
 
+void signal_recheckButtons(void) {
+	enableMenu();
+	while(buttonState.pressed != Button_None) {
+		processButton();
+	}
+	disableMenu();
+}
+
+inline bool waitTrigger(void) {
+	if(config.syncOut != SyncOut_Trigger) return true;
+
+	HSDDR &= ~_BV(HS); // configure HS as input
+	SPCR &= ~(1 << CPHA);
+
+	uint32_t count = delayMsToCount(config.triggerDelay);
+	if(count == 0) {
+		while(true) {
+			if(bit_is_set(HSPIN, HS)) return true;
+			if(bit_is_set(SPCR, CPHA)) return false;
+		}
+	}
+	else {
+		while(true) {
+			if(bit_is_set(HSPIN, HS)) break;
+			if(bit_is_set(SPCR, CPHA)) return false;
+		}
+		delayCount(count);
+		return true;
+	}
+}
+
 void signal_continue(void) {
-	uint32_t acc = freqToAcc(config.freq, (config.syncOut == 1) ? OUT_SYNC_TICKS : OUT_TICKS);
+	uint32_t acc = freqToAcc(config.freq, (config.syncOut == SyncOut_Multiple) ? OUT_SYNC_TICKS : OUT_TICKS);
 	if(acc == 0) acc = 1;
 
-	SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
+	SPCR &= ~(1 << CPHA); // clear CPHA bit in SPCR register to allow DDS
 
-	if(config.syncOut == 1) {
+	if(config.syncOut == SyncOut_Multiple) {
 		signalWithSyncOut(signalBuffer,
 			(uint8_t)(acc >> 16),
 			(uint8_t)(acc >> 8),
 			(uint8_t)acc);
 	}
 	else {
-		syncPulse();
-		signalOut(signalBuffer,
-			(uint8_t)(acc >> 16),
-			(uint8_t)(acc >> 8),
-			(uint8_t)acc);
+		if(config.syncOut == SyncOut_Single) {
+			syncPulse();
+			signalOut(signalBuffer,
+				(uint8_t)(acc >> 16),
+				(uint8_t)(acc >> 8),
+				(uint8_t)acc);
+		}
+		else if(waitTrigger()) {
+			signalOut(signalBuffer,
+				(uint8_t)(acc >> 16),
+				(uint8_t)(acc >> 8),
+				(uint8_t)acc);
+		}
 	}
 
 	R2RPORT = config.offLevel;
 
 	// generation is interrupted - check buttons
-	enableMenu();
-	while(buttonState.pressed != Button_None) {
-		processButton();
-	}
-	disableMenu();
+	signal_recheckButtons();
 }
 
 void signal_run(void) {
@@ -901,7 +1004,7 @@ void signal_onStart(void) {
 void noise_updateDisplay(void) {
 	LCDGotoXY(0, 1);
 	CopyStringtoLCD(RND, 0, 1);
-	CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
+	displaySignalStatus();
 }
 
 void noise_onStart(void) {
@@ -909,27 +1012,29 @@ void noise_onStart(void) {
 	SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
 
 	memcpy_P(signalBuffer, NOISE_SIGNAL, sizeof(signalBuffer));
-	syncPulse();
- 	randomSignalOut(signalBuffer);
+
+	if(config.syncOut == SyncOut_Single || config.syncOut == SyncOut_Multiple) 
+		syncPulse();
+
+	if(waitTrigger()) {
+		randomSignalOut(signalBuffer);
+	}
 
 	signal_stop();
 }
 
 void pulse_updateDisplay(void) {
 	LCDGotoXY(0, 1);
-	if(config.pulse == -INFINITY) {
-		printf("until release   ");
-	}
-	else if(config.pulse == 0.0) {
-		printf("min             ");
-	}
-	else if(config.pulse == INFINITY) {
-		printf("until stop   ");
-		CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
-	}
-	else {
-		printf("%8.3fms      ", config.pulse);
-	}
+	if(config.pulse == -INFINITY)
+		printf("until rel ");
+	else if(config.pulse == 0.0)
+		printf("min       ");
+	else if(config.pulse == INFINITY)
+		printf("until stop");
+	else
+		printf("%8.3fms", config.pulse);
+
+	displaySignalStatus();
 }
 
 void pulse_onLeft(void) {
@@ -972,60 +1077,47 @@ void pulse_onRight(void) {
 
 void pulse_onStart(void) {
 	if(!running) {
-		if(config.pulse == -INFINITY) {
-			HSPORT |=  (1 << HS);
-			R2RPORT = 0xFF;
-			CopyStringtoLCD(MNON, 13, 1);
-			while(buttonState.pressed != Button_None) {
-				processButton();
+		running = true;
+		pulse_updateDisplay();
+		bool hsOut = isHsOutputEnabled();
+		if(waitTrigger()) {
+			if(config.pulse == -INFINITY) {
+				if(hsOut) HSPORT |=  (1 << HS);
+				R2RPORT = 0xFF;
+				while(buttonState.pressed != Button_None) {
+					processButton();
+				}
+				if(hsOut) HSPORT &= ~(1 << HS);
+				R2RPORT = config.offLevel;
 			}
-			HSPORT &= ~(1 << HS);
-			R2RPORT = config.offLevel;
-			CopyStringtoLCD(MNOFF, 13, 1);
-		}
-		else if(config.pulse == INFINITY) {
-			HSPORT |=  (1 << HS);
-			R2RPORT = 0xFF;
-			CopyStringtoLCD(MNON, 13, 1);
-			running = true;
-			while(running) {
-				processButton();
+			else if(config.pulse == INFINITY) {
+				if(hsOut) HSPORT |=  (1 << HS);
+				R2RPORT = 0xFF;
+				while(running) {
+					processButton();
+				}
+				if(hsOut) HSPORT &= ~(1 << HS);
+				R2RPORT = config.offLevel;
 			}
-			HSPORT &= ~(1 << HS);
-			R2RPORT = config.offLevel;
-			CopyStringtoLCD(MNOFF, 13, 1);
+			else if(config.pulse == 0.0) {
+				R2RPORT = 0xFF;
+				if(hsOut) {
+					HSPORT |=  (1 << HS);
+					HSPORT &= ~(1 << HS);
+				}
+				R2RPORT = config.offLevel;
+			}
+			else {
+				uint32_t count = delayMsToCount(config.pulse);
+				R2RPORT = 0xFF;
+				if(hsOut) HSPORT |=  (1 << HS);
+				delayCount(count);
+				if(hsOut) HSPORT &= ~(1 << HS);
+				R2RPORT = config.offLevel;
+			}
 		}
-		else if(config.pulse == 0.0) {
-			R2RPORT = 0xFF;
-			HSPORT |=  (1 << HS);
-			HSPORT &= ~(1 << HS);
-			R2RPORT = config.offLevel;
-		}
-		else {
-			uint32_t count = (double)(CPU_FREQ / 1000) * config.pulse / 6;
-			CopyStringtoLCD(MNON, 13, 1);
-			R2RPORT = 0xFF;
-			HSPORT |=  (1 << HS);
-
-			asm volatile(
-				// takes 6 cycles
-				"1:" "\n\t"
-				"subi %[c0], 1		; 1 c" 		"\n\t"
-				"sbci %[c1], 0 		; 1 c" 		"\n\t"
-				"sbci %[c2], 0 		; 1 c" 		"\n\t"
-				"sbci %[c3], 0 		; 1 c" 		"\n\t"
-				"brne 1b 		; 2 c" 		"\n\t"
-				:
-				: [c3] "d"((uint8_t)(count >> 24)),
-				  [c2] "d"((uint8_t)(count >> 16)),
-				  [c1] "d"((uint8_t)(count >> 8)),
-				  [c0] "d"((uint8_t)count)
-			);
-		
-			HSPORT &= ~(1 << HS);
-			R2RPORT = config.offLevel;
-			CopyStringtoLCD(MNOFF, 13, 1);
-		}
+		running = false;
+		pulse_updateDisplay();
 	}
 	else {
 		running = false;
@@ -1051,10 +1143,17 @@ void freqStep_onRight(void) {
 	freqStep_updateDisplay();
 }
 
+void displayHsOutputStatus(void) {
+	if(isHsOutputEnabled())
+		CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
+	else
+		CopyStringtoLCD(MNDIS, 13, 1);
+}
+
 void hs_updateDisplay(void) {
 	LCDGotoXY(0, 1);
 	printf(" %5uMHz", config.hsFreq);
-	CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
+	displayHsOutputStatus();
 }
 
 void hs_restart(void) {
@@ -1081,7 +1180,7 @@ void hs_onStart(void) {
 	if(running) {
 		running = false;
 	}
-	else {
+	else if(isHsOutputEnabled()) {
 		saveSettings();
 		running = true;
 		menuEntry.updateDisplay();
@@ -1107,12 +1206,16 @@ void pwm_updateDisplay(void) {
 	pwm_displayDuty();
 }
 
+void pwn_prepareBuffer(void) {
+	for(uint8_t i = 0; ; ++i) {
+		signalBuffer[i] = (i <= config.pwmDuty) ? 255 : 0;
+		if(i == 255) break;
+	}
+}
+
 void pwm_run(void) {
 	while(running) {
-		for(uint8_t i = 0; ; ++i) {
-			signalBuffer[i] = (i <= config.pwmDuty) ? 255 : 0;
-			if(i == 255) break;
-		}
+		pwn_prepareBuffer();
 		signal_continue();
 	}
 }
@@ -1161,14 +1264,14 @@ void pwmHs_updateDisplay(void) {
 	pwm_displayDuty();
 	LCDGotoXY(0, 1);
 	printf("%8.2fHz", freq);
-	CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
+	displayHsOutputStatus();
 }
 
 void pwmHs_onStart(void) {
 	if(running) {
 		running = false;
 	}
-	else {
+	else if(isHsOutputEnabled()) {
 		saveSettings();
 		running = true;
 		menuEntry.updateDisplay();
@@ -1250,7 +1353,7 @@ void sweep_updateDisplay(void) {
 			break;
 
 	}
-	CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
+	displaySignalStatus();
 }
 
 void sweep_onUp(void) {
@@ -1327,18 +1430,22 @@ void sweep_continue(void) {
 
 	SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
 
-	syncPulse();
-	sweepOut(signalBuffer,
-		startIndex,
-		(uint8_t)(acc >> 16),
-		(uint8_t)(acc >> 8),
-		(uint8_t)acc,
-		(uint8_t)(inc >> 16),
-		(uint8_t)(inc >> 8),
-		(uint8_t)inc,
-		(uint8_t)(end >> 16),
-		(uint8_t)(end >> 8),
-		(uint8_t)end);
+	if(config.syncOut == SyncOut_Single || config.syncOut == SyncOut_Multiple) 
+		syncPulse();
+
+	if(waitTrigger()) {
+		sweepOut(signalBuffer,
+			startIndex,
+			(uint8_t)(acc >> 16),
+			(uint8_t)(acc >> 8),
+			(uint8_t)acc,
+			(uint8_t)(inc >> 16),
+			(uint8_t)(inc >> 8),
+			(uint8_t)inc,
+			(uint8_t)(end >> 16),
+			(uint8_t)(end >> 8),
+			(uint8_t)end);
+	}
 	R2RPORT = config.offLevel;
 
 	// generation is interrupted - check buttons
@@ -1371,7 +1478,6 @@ void sweep_onStart(void) {
 					disableMenu();
 
 					memcpy_P(signalBuffer, SINE_WAVE_FROM_ZERO, sizeof(signalBuffer));
-
 					while(running) {
 						sweep_continue();
 					}
@@ -1408,21 +1514,61 @@ void offLevel_onRight(void) {
 }
 
 void syncOut_updateDisplay(void) {
-	CopyStringtoLCD(config.syncOut ? MNON : MNOFF, 13, 1);
+	LCDGotoXY(0, 1);
+	switch(config.syncOut) {
+		case SyncOut_Off:      printf("Off     "); break; 
+		case SyncOut_Single:   printf("Single  "); break;
+		case SyncOut_Multiple: printf("Multiple"); break;
+		case SyncOut_Trigger:  printf("Trigger "); break;
+		case SyncOut_End:                        ; break; 
+	}
 }
 
-void syncOut_onStart(void) {
-	switch(config.syncOut) {
-		case 0: config.syncOut = 1; break;
-		case 1: config.syncOut = 0; break;
-	}
+void syncOut_onLeft(void) {
+	if(config.syncOut != SyncOut_Off)
+		config.syncOut = (enum SyncOut)((uint8_t)config.syncOut - 1);
 	syncOut_updateDisplay();
+}
+
+void syncOut_onRight(void) {
+	config.syncOut = (enum SyncOut)((uint8_t)config.syncOut + 1);
+	if(config.syncOut == SyncOut_End) config.syncOut = (enum SyncOut)((uint8_t)SyncOut_End - 1);
+	syncOut_updateDisplay();
+}
+
+void syncOut_onOpt(void) {
+	setHsDirection(); // commit selection
+	optMenu_onOpt();
+}
+
+void trigger_updateDisplay(void) {
+	LCDGotoXY(0, 1);
+	if(config.syncOut == SyncOut_Trigger)
+		printf("%8.3fms", config.triggerDelay);
+	else
+		printf("Off       ");
+}
+
+void trigger_onLeft(void) {
+	config.syncOut = SyncOut_Trigger;
+	config.triggerDelay -= config.freqStep / 100;
+	if(config.triggerDelay < MIN_PULSE)
+		config.triggerDelay = 0.0;
+	trigger_updateDisplay();
+}
+
+void trigger_onRight(void) {
+	config.syncOut = SyncOut_Trigger;
+	config.triggerDelay += config.freqStep / 100;
+	if(config.triggerDelay > MAX_PULSE)
+		config.triggerDelay = MAX_PULSE;
+	trigger_updateDisplay();
 }
 
 void calFreq_updateDisplay(void) {
 	LCDGotoXY(0, 1);
 	printf("%7.5f", config.freqCal);
-	CopyStringtoLCD(running ? MNON : MNOFF, 13, 1);
+	displaySignalStatus();
 }
 
 void calFreq_onStart(void) {
@@ -1475,7 +1621,7 @@ http://www.myplace.nu/avr/minidds/index.htm
 small modification is made - added additional command which
 checks if CPHA bit is set in SPCR register if yes - exit function
 */
-void static signalOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t ad0)
+inline void static signalOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t ad0)
 {
 	asm volatile(
 		"eor r18, r18 			; r18<-0"			"\n\t"
@@ -1492,13 +1638,12 @@ void static signalOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t a
 		: [ad0] "r"(ad0), [ad1] "r"(ad1), [ad2] "r"(ad2), // phase increment
 		  [sig] "z"(signal),                              // signal source
 		  [out] "I"(_SFR_IO_ADDR(R2RPORT)),               // output port
-		  [sync] "I"(_SFR_IO_ADDR(SYNCPORT)),             // sync port
 		  [cond] "I"(_SFR_IO_ADDR(SPCR))                  // exit condition
 		: "r18", "r19" 
 	);
 }
 
-void static signalWithSyncOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t ad0)
+inline void static signalWithSyncOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t ad0)
 {
 	asm volatile(
 		"eor r18, r18 			; r18<-0"			"\n\t"
@@ -1521,13 +1666,13 @@ void static signalWithSyncOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, u
 		: [ad0] "r"(ad0), [ad1] "r"(ad1), [ad2] "r"(ad2), // phase increment
 		  [sig] "z"(signal),                              // signal source
 		  [out] "I"(_SFR_IO_ADDR(R2RPORT)),               // output port
-		  [sync] "I"(_SFR_IO_ADDR(SYNCPORT)),             // sync port
+		  [sync] "I"(_SFR_IO_ADDR(HSPORT)),               // sync port
 		  [cond] "I"(_SFR_IO_ADDR(SPCR))                  // exit condition
 		: "r18", "r19" 
 	);
 }
 
-void static randomSignalOut(const uint8_t *signal)
+inline void static randomSignalOut(const uint8_t *signal)
 {
 	asm volatile(
 		"ldi r18, 252"							"\n\t"
@@ -1553,10 +1698,10 @@ void static randomSignalOut(const uint8_t *signal)
 	);
 }
 
-void static sweepOut(const uint8_t *signal, uint8_t startIndex,
-                     uint8_t a2, uint8_t a1, uint8_t a0,
-                     uint8_t i2, uint8_t i1, uint8_t i0,
-                     uint8_t e2, uint8_t e1, uint8_t e0)
+inline void static sweepOut(const uint8_t *signal, uint8_t startIndex,
+                            uint8_t a2, uint8_t a1, uint8_t a0,
+                            uint8_t i2, uint8_t i1, uint8_t i0,
+                            uint8_t e2, uint8_t e1, uint8_t e0)
 {
 	asm volatile(
 		"eor r18, r18 			; "				"\n\t" // r18 = 0
@@ -1714,7 +1859,7 @@ void init(void) {
 	BDDR2  &= ~(_BV(BTN_INT));
 	BPORT2  =  (_BV(BTN_INT));
 
-	HSDDR |= _BV(HS) | _BV(SYNC); // configure HS as output
+	setHsDirection();
 	timer2Init();
 	enableMenu();
 	onNewMenuEntry();

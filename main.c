@@ -725,6 +725,12 @@ void loadSettings(void) {
 	eeprom_read_block(&config, EE_CONFIG, sizeof(config));
 }
 
+inline void syncPulse(void)
+{
+	HSPORT |=  (1 << HS);
+	HSPORT &= ~(1 << HS);
+}
+
 void buttonNop(void) {
 }
 
@@ -849,10 +855,7 @@ void signal_continue(void) {
 			(uint8_t)acc);
 	}
 	else {
-		// sync impuls on ths HS-output
-		HSPORT |=  (1 << HS);
-		HSPORT &= ~(1 << HS);
-
+		syncPulse();
 		signalOut(signalBuffer,
 			(uint8_t)(acc >> 16),
 			(uint8_t)(acc >> 8),
@@ -906,7 +909,8 @@ void noise_onStart(void) {
 	SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
 
 	memcpy_P(signalBuffer, NOISE_SIGNAL, sizeof(signalBuffer));
-	randomSignalOut(signalBuffer);
+	syncPulse();
+ 	randomSignalOut(signalBuffer);
 
 	signal_stop();
 }
@@ -1323,10 +1327,7 @@ void sweep_continue(void) {
 
 	SPCR &= ~(1<<CPHA); // clear CPHA bit in SPCR register to allow DDS
 
-	// sync impuls on ths HS-output
-	HSPORT |=  (1 << HS);
-	HSPORT &= ~(1 << HS);
-
+	syncPulse();
 	sweepOut(signalBuffer,
 		startIndex,
 		(uint8_t)(acc >> 16),
@@ -1529,16 +1530,26 @@ void static signalWithSyncOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, u
 void static randomSignalOut(const uint8_t *signal)
 {
 	asm volatile(
+		"ldi r18, 252"							"\n\t"
+		"mov r19, r18"							"\n\t"
 		"1:"								"\n\t"
-		"ld __tmp_reg__, Z 		; 2 cycles" 			"\n\t"
-		"inc r30			; 1 cycle"			"\n\t"
-		"out %[out], __tmp_reg__	; 1 cycle"			"\n\t"
-		"sbis %[cond], 2		; 1 cycle if no skip" 		"\n\t"
-		"rjmp 1b			; 2 cycles. Total 7 cycles"	"\n\t"
+		"ld __tmp_reg__, Z 		; 2 c" 				"\n\t"
+		"out %[out], __tmp_reg__	; 1 c"				"\n\t"
+		"inc r30			; 1 c"				"\n\t"
+
+		"dec r19			; 1 c"				"\n\t" // just to "random" position in buffer every 251 iteration
+		"brne 2f			; 1/2 c"			"\n\t"
+		"mov r19, r18			; 1 c"				"\n\t"
+		"mov r30, __tmp_reg__		; 1 c"				"\n\t"
+
+		"2:"								"\n\t"
+		"sbis %[cond], 2		; 1 c"		 		"\n\t"
+		"rjmp 1b			; 2 c. Total 10/11 cycles"	"\n\t"
 		:
 		: [sig] "z"(signal),                              // signal source
 		  [out] "I"(_SFR_IO_ADDR(R2RPORT)),               // output port
 		  [cond] "I"(_SFR_IO_ADDR(SPCR))                  // exit condition
+		: "r18", "r19" 
 	);
 }
 

@@ -51,21 +51,23 @@
 #define EE_CONFIG     0
 #define EE_INIT       E2END
 
-#define CPU_FREQ           16000000ul
-#define OUT_TICKS          9
-#define OUT_SYNC_TICKS     14
-#define ACC_FRAC_BITS      16
-#define SIGNAL_BUFFER_SIZE 256
+#define CPU_FREQ            16000000ul
+#define OUT_TICKS           10
+#define OUT_SYNC_TICKS      15
+#define SWEEP_OUT_TICKS     9
+#define ACC_FRAC_BITS       24
+#define SWEEP_ACC_FRAC_BITS 16
+#define SIGNAL_BUFFER_SIZE  256
 
 #define MIN_FREQ      0.0        // minimum DDS frequency
 #define MAX_FREQ      250000.0   // maximum DDS frequency
-#define MIN_FREQ_STEP 0.1        // minimum DDS frequency step
+#define MIN_FREQ_STEP 0.001      // minimum DDS frequency step
 #define MAX_FREQ_STEP 10000.0    // maximum DDS frequency step
 #define MIN_FREQ_INC  0.0        // minimum sweep frequency increment
 #define MAX_FREQ_INC  100.0      // maximum sweep frequency increment
 #define MIN_FREQ_CAL  0.09
 #define MAX_FREQ_CAL  1.01
-#define STEP_FREQ_CAL 0.00001
+#define STEP_FREQ_CAL 0.000001
 #define MIN_PULSE     0.001      // minimum pulse duration, ms
 #define MAX_PULSE     1000.0     // maximum pulse duration, ms
 
@@ -75,8 +77,8 @@ void timer2Stop(void);
 void timer1Start(uint8_t);
 void timer1StartPwm(uint16_t);
 void timer1Stop(void);
-inline void static signalOut(const uint8_t *, uint8_t, uint8_t, uint8_t);
-inline void static signalWithSyncOut(const uint8_t *, uint8_t, uint8_t, uint8_t);
+inline void static signalOut(const uint8_t *, uint8_t, uint8_t, uint8_t, uint8_t);
+inline void static signalWithSyncOut(const uint8_t *, uint8_t, uint8_t, uint8_t, uint8_t);
 inline void static randomSignalOut(const uint8_t *);
 inline void static sweepOut(const uint8_t *, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t, uint8_t);
 
@@ -95,6 +97,8 @@ void signal_onRight(void);
 void signal_onStart(void);
 void freqStep_onLeft(void);
 void freqStep_onRight(void);
+void freqMode_onLeft(void);
+void freqMode_onRight(void);
 void noise_onStart(void);
 void pulse_onStart(void);
 void pulse_onLeft(void);
@@ -134,6 +138,7 @@ void signal_updateDisplay(void);
 void noise_updateDisplay(void);
 void pulse_updateDisplay(void);
 void freqStep_updateDisplay(void);
+void freqMode_updateDisplay(void);
 void hs_updateDisplay(void);
 void pwm_updateDisplay(void);
 void pwmHs_updateDisplay(void);
@@ -172,20 +177,26 @@ enum SyncOut {
 	SyncOut_End
 };
 
+enum FreqMode {
+	FreqMode_Exact,
+	FreqMode_Jitter
+};
+
 struct Config {
-	uint8_t  menuEntry;	// active or last active main menu entry
-	double   freq;		// frequency value, Hz
-	double   freqCal;	// frequence calibration coefficient
-	double   freqEnd;	// end frequency for sweep, Hz
-	double   freqInc;	// frequency increment for sweep, Hz
-	uint8_t  hsFreq;	// high speed frequency [1..8 MHz]
-	double   freqStep;	// frequency step value, Hz
-	uint16_t pwmFreq;	// PWM freq [61..62500 Hz]
-	uint8_t  pwmDuty;
-	uint8_t  offLevel;	// output value when then generator if off
-	double   pulse;         // pulse duration, ms
-	enum SyncOut syncOut;
-	double   triggerDelay;  // deleay after trigger detection, ms
+	uint8_t       menuEntry;     // active or last active main menu entry
+	double        freq;          // frequency value, Hz
+	double        freqCal;       // frequence calibration coefficient
+	double        freqEnd;       // end frequency for sweep, Hz
+	double        freqInc;       // frequency increment for sweep, Hz
+	uint8_t       hsFreq;        // high speed frequency [1..8 MHz]
+	double        freqStep;      // frequency step value, Hz
+	enum FreqMode freqMode;
+	uint16_t      pwmFreq;       // PWM freq [61..62500 Hz]
+	uint8_t       pwmDuty;
+	uint8_t       offLevel;      // output value when then generator if off
+	double        pulse;         // pulse duration, ms
+	enum SyncOut  syncOut;
+	double        triggerDelay;  // deleay after trigger detection, ms
 };
 
 struct Config config = {
@@ -376,7 +387,8 @@ const char TRIANGLE_TITLE[]  PROGMEM = "    Triangle    ";
 const char SAW_TITLE[]       PROGMEM = "    SawTooth    ";
 const char REV_SAW_TITLE[]   PROGMEM = "  Rev SawTooth  ";
 const char ECG_TITLE[]       PROGMEM = "      ECG       ";
-const char FREQ_STEP_TITLE[] PROGMEM = "    Freq Step   ";
+const char FREQ_STEP_TITLE[] PROGMEM = "   Freq Step    ";
+const char FREQ_MODE_TITLE[] PROGMEM = "   Freq Mode    ";
 const char NOISE_TITLE[]     PROGMEM = "     Noise      ";
 const char PULSE_TITLE[]     PROGMEM = "     Pulse      ";
 const char HS_TITLE[]        PROGMEM = "   High Speed   ";
@@ -560,6 +572,19 @@ const struct MenuEntry OPT_MENU[] PROGMEM = {
 			optMenu_onDown,
 			freqStep_onLeft,
 			freqStep_onRight,
+			optMenu_onOpt,
+			optMenu_onOpt,
+		}
+	},
+	{
+		FREQ_MODE_TITLE,
+		NULL,
+		freqMode_updateDisplay,
+		{
+			optMenu_onUp,
+			optMenu_onDown,
+			freqMode_onLeft,
+			freqMode_onRight,
 			optMenu_onOpt,
 			optMenu_onOpt,
 		}
@@ -864,9 +889,13 @@ void displaySignalStatus(void) {
 		CopyStringtoLCD(MNOFF, 13, 1);
 }
 
-void signal_updateDisplay(void) {
+void showFreq(double freq) {
 	LCDGotoXY(0, 1);
-	printf("%8.1fHz", config.freq);
+	printf("%10.3fHz", freq);
+}
+
+void signal_updateDisplay(void) {
+	showFreq(config.freq);
 	displaySignalStatus();
 }
 
@@ -910,6 +939,11 @@ uint32_t freqToAcc(double freq, uint8_t ticks) {
 	return freq/(resolution / config.freqCal);
 }
 
+double accToFreq(uint32_t acc, uint8_t ticks) {
+	double resolution = (double)CPU_FREQ / ticks / ((uint32_t)1 << ACC_FRAC_BITS) / SIGNAL_BUFFER_SIZE;
+	return (double)acc * (resolution / config.freqCal);
+}
+
 void signal_recheckButtons(void) {
 	enableMenu();
 	while(buttonState.pressed != Button_None) {
@@ -941,32 +975,49 @@ inline bool waitTrigger(void) {
 	}
 }
 
-void signal_continue(void) {
-	uint32_t acc = freqToAcc(config.freq, (config.syncOut == SyncOut_Multiple) ? OUT_SYNC_TICKS : OUT_TICKS);
+void signal_continue(bool tryToCorrect) {
+	uint32_t ticks = (config.syncOut == SyncOut_Multiple) ? OUT_SYNC_TICKS : OUT_TICKS;
+	uint32_t acc = freqToAcc(config.freq, ticks);
 	if(acc == 0) acc = 1;
+
+	if(tryToCorrect && config.freqMode == FreqMode_Jitter) {
+		// try to minimize jitter
+		uint64_t k = ((uint64_t)UINT32_MAX + 1) / acc;
+		acc = ((uint64_t)UINT32_MAX + 1) / k;
+		double freq = accToFreq(acc, ticks);
+		showFreq(freq);
+	}
 
 	SPCR &= ~(1 << CPHA); // clear CPHA bit in SPCR register to allow DDS
 
-	if(config.syncOut == SyncOut_Multiple) {
-		signalWithSyncOut(signalBuffer,
-			(uint8_t)(acc >> 16),
-			(uint8_t)(acc >> 8),
-			(uint8_t)acc);
-	}
-	else {
-		if(config.syncOut == SyncOut_Single) {
+	switch(config.syncOut) {
+		case SyncOut_Single:
 			syncPulse();
+			// continue
+		case SyncOut_Off:
 			signalOut(signalBuffer,
+				(uint8_t)(acc >> 24),
 				(uint8_t)(acc >> 16),
 				(uint8_t)(acc >> 8),
 				(uint8_t)acc);
-		}
-		else if(waitTrigger()) {
-			signalOut(signalBuffer,
+			break;
+		case SyncOut_Multiple:
+			signalWithSyncOut(signalBuffer,
+				(uint8_t)(acc >> 24),
 				(uint8_t)(acc >> 16),
 				(uint8_t)(acc >> 8),
 				(uint8_t)acc);
-		}
+			break;
+		case SyncOut_Trigger:
+			if(waitTrigger()) {
+				signalOut(signalBuffer,
+					(uint8_t)(acc >> 24),
+					(uint8_t)(acc >> 16),
+					(uint8_t)(acc >> 8),
+					(uint8_t)acc);
+			}
+			break;
+		case SyncOut_End: break;
 	}
 
 	R2RPORT = config.offLevel;
@@ -978,7 +1029,7 @@ void signal_continue(void) {
 void signal_run(void) {
 	memcpy_P(signalBuffer, (const uint8_t *)menuEntry.data, sizeof(signalBuffer));
 	while(running) {
-		signal_continue();
+		signal_continue(true);
 	}
 }
 
@@ -1126,7 +1177,7 @@ void pulse_onStart(void) {
 
 void freqStep_updateDisplay(void) {
 	LCDGotoXY(0, 1);
-	printf("%8.1fHz", config.freqStep);
+	printf("%10.3fHz", config.freqStep);
 }
 
 void freqStep_onLeft(void) {
@@ -1141,6 +1192,24 @@ void freqStep_onRight(void) {
 	if(config.freqStep > MAX_FREQ_STEP)
 		config.freqStep = MAX_FREQ_STEP;
 	freqStep_updateDisplay();
+}
+
+void freqMode_updateDisplay(void) {
+	LCDGotoXY(0, 1);
+	switch(config.freqMode) {
+		case FreqMode_Exact:    printf("Exact      "); break; 
+		case FreqMode_Jitter:   printf("Min. jitter"); break;
+	}
+}
+
+void freqMode_onLeft(void) {
+	if(config.freqMode == FreqMode_Jitter) config.freqMode = FreqMode_Exact;
+	freqMode_updateDisplay();
+}
+
+void freqMode_onRight(void) {
+	if(config.freqMode == FreqMode_Exact) config.freqMode = FreqMode_Jitter;
+	freqMode_updateDisplay();
 }
 
 void displayHsOutputStatus(void) {
@@ -1216,7 +1285,7 @@ void pwn_prepareBuffer(void) {
 void pwm_run(void) {
 	while(running) {
 		pwn_prepareBuffer();
-		signal_continue();
+		signal_continue(true);
 	}
 }
 
@@ -1337,19 +1406,19 @@ void sweep_updateDisplay(void) {
 		case 0:
 			CopyStringtoLCD(SWEEP_TITLE, 0, 0);
 			LCDGotoXY(0, 1);
-			printf("%8.1fHz", config.freq);
+			printf("%10.3fHz", config.freq);
 			break;
 
 		case 1:
 			CopyStringtoLCD(SWEEP_END_TITLE, 0, 0);
 			LCDGotoXY(0, 1);
-			printf("%8.1fHz", config.freqEnd);
+			printf("%10.3fHz", config.freqEnd);
 			break;
 
 		case 2:
 			CopyStringtoLCD(SWEEP_INC_TITLE, 0, 0);
 			LCDGotoXY(0, 1);
-			printf("%8.1fHz", config.freqInc);
+			printf("%10.3fHz", config.freqInc);
 			break;
 
 	}
@@ -1412,17 +1481,22 @@ void sweep_onRight(void) {
 	sweep_updateDisplay();
 }
 
+uint32_t sweepFreqToAcc(double freq) {
+	double resolution = (double)CPU_FREQ / SWEEP_OUT_TICKS / ((uint32_t)1 << SWEEP_ACC_FRAC_BITS) / SIGNAL_BUFFER_SIZE;
+	return freq/(resolution / config.freqCal);
+}
+
 void sweep_continue(void) {
 	double freq = config.freq - config.freqInc; // one step back for the first 1/4 of wave
 	if(freq < 0.0) freq = 0.0;
 
-	uint32_t acc = freqToAcc(config.freq, OUT_TICKS);
+	uint32_t acc = sweepFreqToAcc(config.freq);
 	if(acc == 0) acc = 1;
 
-	uint32_t inc = freqToAcc(config.freqInc, OUT_TICKS);
+	uint32_t inc = sweepFreqToAcc(config.freqInc);
 	if(inc == 0) inc = 1;
 
-	uint32_t end = freqToAcc(config.freqEnd, OUT_TICKS);
+	uint32_t end = sweepFreqToAcc(config.freqEnd);
 	if(end < acc) end = acc;
 
 	uint8_t startIndex = sizeof(signalBuffer) / 2; // here should be the maximum
@@ -1567,7 +1641,7 @@ void trigger_onRight(void) {
 
 void calFreq_updateDisplay(void) {
 	LCDGotoXY(0, 1);
-	printf("%7.5f", config.freqCal);
+	printf("%8.6f", config.freqCal);
 	displaySignalStatus();
 }
 
@@ -1579,7 +1653,7 @@ void calFreq_onStart(void) {
 
 		memcpy_P(signalBuffer, SINE_WAVE_FROM_ZERO, sizeof(signalBuffer));
 		while(running) {
-			signal_continue();
+			signal_continue(false);
 		}
 
 		enableMenu();
@@ -1621,37 +1695,41 @@ http://www.myplace.nu/avr/minidds/index.htm
 small modification is made - added additional command which
 checks if CPHA bit is set in SPCR register if yes - exit function
 */
-inline void static signalOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t ad0)
+inline void static signalOut(const uint8_t *signal, uint8_t ad3, uint8_t ad2, uint8_t ad1, uint8_t ad0)
 {
 	asm volatile(
+		"eor r17, r17 			; r17<-0"			"\n\t"
 		"eor r18, r18 			; r18<-0"			"\n\t"
 		"eor r19, r19 			; r19<-0"			"\n\t"
 		"1:"								"\n\t"
-		"add r18, %[ad0]		; 1 cycle"			"\n\t"
-		"adc r19, %[ad1]		; 1 cycle"			"\n\t"	
-		"adc %A[sig], %[ad2]		; 1 cycle"			"\n\t"
+		"add r17, %[ad0]		; 1 cycle"			"\n\t"
+		"adc r18, %[ad1]		; 1 cycle"			"\n\t"
+		"adc r19, %[ad2]		; 1 cycle"			"\n\t"	
+		"adc %A[sig], %[ad3]		; 1 cycle"			"\n\t"
 		"ld __tmp_reg__, Z 		; 2 cycles" 			"\n\t"
 		"out %[out], __tmp_reg__	; 1 cycle"			"\n\t"
 		"sbis %[cond], 2		; 1 cycle if no skip" 		"\n\t"
-		"rjmp 1b			; 2 cycles. Total 9 cycles"	"\n\t"
+		"rjmp 1b			; 2 cycles. Total 10 cycles"	"\n\t"
 		:
-		: [ad0] "r"(ad0), [ad1] "r"(ad1), [ad2] "r"(ad2), // phase increment
-		  [sig] "z"(signal),                              // signal source
-		  [out] "I"(_SFR_IO_ADDR(R2RPORT)),               // output port
-		  [cond] "I"(_SFR_IO_ADDR(SPCR))                  // exit condition
-		: "r18", "r19" 
+		: [ad0] "r"(ad0), [ad1] "r"(ad1), [ad2] "r"(ad2), [ad3] "r"(ad3), // phase increment
+		  [sig] "z"(signal),                                              // signal source
+		  [out] "I"(_SFR_IO_ADDR(R2RPORT)),                               // output port
+		  [cond] "I"(_SFR_IO_ADDR(SPCR))                                  // exit condition
+		: "r17", "r18", "r19" 
 	);
 }
 
-inline void static signalWithSyncOut(const uint8_t *signal, uint8_t ad2, uint8_t ad1, uint8_t ad0)
+inline void static signalWithSyncOut(const uint8_t *signal, uint8_t ad3, uint8_t ad2, uint8_t ad1, uint8_t ad0)
 {
 	asm volatile(
+		"eor r17, r17 			; r17<-0"			"\n\t"
 		"eor r18, r18 			; r18<-0"			"\n\t"
 		"eor r19, r19 			; r19<-0"			"\n\t"
 		"1:"								"\n\t"
-		"add r18, %[ad0]		; 1 cycle"			"\n\t"
-		"adc r19, %[ad1]		; 1 cycle"			"\n\t"	
-		"adc %A[sig], %[ad2]		; 1 cycle"			"\n\t"
+		"add r17, %[ad0]		; 1 cycle"			"\n\t"
+		"adc r18, %[ad1]		; 1 cycle"			"\n\t"	
+		"adc r19, %[ad2]		; 1 cycle"			"\n\t"	
+		"adc %A[sig], %[ad3]		; 1 cycle"			"\n\t"
 		"ld __tmp_reg__, Z 		; 2 cycles" 			"\n\t"
 		"out %[out], __tmp_reg__	; 1 cycle"			"\n\t"
 
@@ -1663,12 +1741,12 @@ inline void static signalWithSyncOut(const uint8_t *signal, uint8_t ad2, uint8_t
 		"sbis %[cond], 2		; 1 cycle if no skip" 		"\n\t"
 		"rjmp 1b			; 2 cycles. Total 15 cycles"	"\n\t"
 		:
-		: [ad0] "r"(ad0), [ad1] "r"(ad1), [ad2] "r"(ad2), // phase increment
-		  [sig] "z"(signal),                              // signal source
-		  [out] "I"(_SFR_IO_ADDR(R2RPORT)),               // output port
-		  [sync] "I"(_SFR_IO_ADDR(HSPORT)),               // sync port
-		  [cond] "I"(_SFR_IO_ADDR(SPCR))                  // exit condition
-		: "r18", "r19" 
+		: [ad0] "r"(ad0), [ad1] "r"(ad1), [ad2] "r"(ad2), [ad3] "r"(ad3), // phase increment
+		  [sig] "z"(signal),                                              // signal source
+		  [out] "I"(_SFR_IO_ADDR(R2RPORT)),                               // output port
+		  [sync] "I"(_SFR_IO_ADDR(HSPORT)),                               // sync port
+		  [cond] "I"(_SFR_IO_ADDR(SPCR))                                  // exit condition
+		: "r17", "r18", "r19" 
 	);
 }
 
@@ -1706,7 +1784,6 @@ inline void static sweepOut(const uint8_t *signal, uint8_t startIndex,
 	asm volatile(
 		"eor r18, r18 			; "				"\n\t" // r18 = 0
 		"eor r19, r19 			; "				"\n\t" // r19 = 0
-		//"ldi %A[sig], 194		; "				"\n\t" // r30 = 3/4 of buffer size
 
 		"1:"								"\n\t"
 		"add r18, %[a0]			; 1 c"				"\n\t"

@@ -663,8 +663,9 @@ enum Button {
 
 struct ButtonState {
 	uint16_t now;
-	uint16_t pressedUntil;
-	uint16_t nextAuto;
+	uint16_t pressedTime;
+	uint16_t autoTime;
+	bool     autoRepeat;
 	volatile enum Button pressed;
 	volatile bool processed;
 };
@@ -673,7 +674,6 @@ struct ButtonState buttonState;
 static const uint16_t BUTTON_UNBOUNCE    = 20;
 static const uint16_t BUTTON_AUTO_START  = 100;
 static const uint16_t BUTTON_AUTO_REPEAT = 8;
-static const uint16_t BUTTON_TIME_WRAP   = 32768;
 
 uint8_t optMenuEntryNum = (uint8_t)-1;   // active opt-menu entry or -1 if not in the opt-menu
 struct MenuEntry menuEntry;              // copy of active menu entry
@@ -763,21 +763,25 @@ void checkButtons(void) {
 	if(buttonState.pressed != newButton) {
 		bool ignore = false;
 		if(newButton == Button_None) {
-			if((buttonState.pressedUntil - now) < BUTTON_TIME_WRAP)
+			if((now - buttonState.pressedTime) < BUTTON_UNBOUNCE)
 				ignore = true;
 		}
 		
 		if(!ignore) {
-			buttonState.pressedUntil = buttonState.now + BUTTON_UNBOUNCE;
-			buttonState.pressed = newButton;
-			buttonState.processed = false;
-			buttonState.nextAuto = buttonState.now + BUTTON_AUTO_START;
+			buttonState.pressedTime = buttonState.now;
+			buttonState.pressed     = newButton;
+			buttonState.processed   = false;
+			buttonState.autoTime    = buttonState.now;
+			buttonState.autoRepeat  = false;
 		}
 	}
 	else if(buttonState.pressed != Button_None) {
-		if((buttonState.nextAuto - now) >= BUTTON_TIME_WRAP) {
-			buttonState.processed = false;
-			buttonState.nextAuto = buttonState.now + BUTTON_AUTO_REPEAT;
+		if(        (!buttonState.autoRepeat && ((now - buttonState.pressedTime) >= BUTTON_AUTO_START))
+			|| ( buttonState.autoRepeat && ((now - buttonState.pressedTime) >= BUTTON_AUTO_REPEAT)))
+		{
+			buttonState.processed   = false;
+			buttonState.autoTime    = buttonState.now;
+			buttonState.autoRepeat  = true;
 		}
 	}
 }

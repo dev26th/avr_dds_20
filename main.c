@@ -742,7 +742,6 @@ ISR(INT2_vect) {
 // called every 4.1 ms, takes ~4 us
 void checkButtons(void) {
 	++buttonState.now;
-	uint16_t now = buttonState.now;
 
 	enum Button newButton;
 	if(bit_is_clear(BPIN, UP))
@@ -763,7 +762,7 @@ void checkButtons(void) {
 	if(buttonState.pressed != newButton) {
 		bool ignore = false;
 		if(newButton == Button_None) {
-			if((now - buttonState.pressedTime) < BUTTON_UNBOUNCE)
+			if((buttonState.now - buttonState.pressedTime) < BUTTON_UNBOUNCE)
 				ignore = true;
 		}
 		
@@ -776,8 +775,8 @@ void checkButtons(void) {
 		}
 	}
 	else if(buttonState.pressed != Button_None) {
-		if(        (!buttonState.autoRepeat && ((now - buttonState.pressedTime) >= BUTTON_AUTO_START))
-			|| ( buttonState.autoRepeat && ((now - buttonState.pressedTime) >= BUTTON_AUTO_REPEAT)))
+		if(        (!buttonState.autoRepeat && ((buttonState.now - buttonState.pressedTime) >= BUTTON_AUTO_START))
+			|| ( buttonState.autoRepeat && ((buttonState.now - buttonState.pressedTime) >= BUTTON_AUTO_REPEAT)))
 		{
 			buttonState.processed   = false;
 			buttonState.autoTime    = buttonState.now;
